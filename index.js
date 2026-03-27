@@ -48,12 +48,16 @@ const token = rawToken.replace(/\s/g, '');
 let botConfig = {};
 
 async function loadBotConfig() {
-    const { data, error } = await supabase.from('hub_settings').select('*').single();
-    if (!error && data) {
-        botConfig = data;
+    try {
+        const { data, error } = await supabase
+            .from('hub_settings')
+            .select('discord_bot_token, discord_announcement_channel, discord_ticket_category, discord_premium_category, discord_qr_image_url')
+            .single();
+
+        if (data) botConfig = data;
         console.log('✅ Bot configuration loaded.');
-    } else {
-        console.error('❌ Failed to load bot config:', error?.message);
+    } catch (err) {
+        console.error('❌ Failed to load bot config:', err.message);
     }
 }
 
@@ -61,33 +65,76 @@ async function loadBotConfig() {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     const content = message.content.toLowerCase();
+    const prefix = '.';
 
-    // Auto-Responder logic
-    const keywords = {
-        'getkey': 'Tutorial ambil key ada di channel <#1395409923059482696>',
-        'cara get key': 'Tutorial ambil key ada di channel <#1395409923059482696>',
-        'dimana key': 'Kunjungi website kami di https://vonixehub.my.id untuk mendapatkan key.',
-        'buy premium': 'Untuk beli premium silakan klik tombol di bawah atau cek channel <#1395409923059482696>'
-    };
+    // Auto-Responder logic (Merged into one beautiful Embed)
+    const keywords = ['getkey', 'cara get key', 'dimana key', 'buy premium', 'bantuan', 'tutor'];
+    if (keywords.some(k => content.includes(k))) {
+        const embed = new EmbedBuilder()
+            .setTitle('✦ Vonixe Hub - Community Navigation ✦')
+            .setDescription('Halo! Berikut adalah panduan cepat untuk akses Vonixe Hub:')
+            .addFields(
+                { name: '🔑 Get Key', value: 'Silakan kunjungi <#1483881102127927477>', inline: true },
+                { name: '🎫 Support/Bug', value: 'Buat ticket di <#1395413976925339730>', inline: true },
+                { name: '💎 Buy Premium', value: 'Informasi ada di <#1487160999189549086>', inline: true }
+            )
+            .setColor(0xffa000)
+            .setFooter({ text: 'Gunakan tombol di channel terkait untuk respon cepat.' });
 
-    for (const [key, response] of Object.entries(keywords)) {
-        if (content.includes(key)) return message.reply(response);
+        return message.reply({ embeds: [embed] });
     }
 
-    // Command: !setup-bot (Owner only)
-    if (content === '!setup-bot' && message.member.permissions.has(PermissionFlagsBits.Administrator)) {
-        const embed = new EmbedBuilder()
-            .setTitle('✦ Vonixe Hub Support ✦')
-            .setDescription('Silakan klik tombol di bawah untuk bantuan atau pembelian.')
-            .setColor(0xffa000);
+    // Command Handlers
+    if (content.startsWith(prefix)) {
+        const args = content.slice(prefix.length).trim().split(/ +/);
+        const command = args.shift().toLowerCase();
 
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('create_ticket_support').setLabel('Support').setStyle(ButtonStyle.Primary).setEmoji('🎫'),
-            new ButtonBuilder().setCustomId('create_ticket_premium').setLabel('Premium').setStyle(ButtonStyle.Success).setEmoji('⭐'),
-            new ButtonBuilder().setLabel('Buy Premium').setStyle(ButtonStyle.Link).setURL('https://vonixehub.my.id').setEmoji('💎')
-        );
+        // Admin Commands
+        if (message.member.permissions.has(PermissionFlagsBits.Administrator)) {
 
-        await message.channel.send({ embeds: [embed], components: [row] });
+            // 1. .setup-support
+            if (command === 'setup-support') {
+                await message.delete().catch(() => { });
+                const embed = new EmbedBuilder()
+                    .setTitle('✦ Vonixe Support Ticket ✦')
+                    .setDescription('Klik tombol di bawah jika butuh bantuan atau ingin melaporkan bug.')
+                    .setColor(0x0099ff);
+
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('create_ticket_support').setLabel('Create Support Ticket').setStyle(ButtonStyle.Primary).setEmoji('🎫')
+                );
+
+                await message.channel.send({ embeds: [embed], components: [row] });
+            }
+
+            // 2. .setup-premium
+            if (command === 'setup-premium') {
+                await message.delete().catch(() => { });
+                const embed = new EmbedBuilder()
+                    .setTitle('✦ Vonixe Premium Access ✦')
+                    .setDescription('Klik tombol di bawah untuk membeli atau memperpanjang Premium.')
+                    .setColor(0x50dc78);
+
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('create_ticket_premium').setLabel('Buy / Renew Premium').setStyle(ButtonStyle.Success).setEmoji('⭐')
+                );
+
+                await message.channel.send({ embeds: [embed], components: [row] });
+            }
+
+            // 3. .qr
+            if (command === 'qr') {
+                await message.delete().catch(() => { });
+                await loadBotConfig(); // Ensure latest config
+                const qrUrl = botConfig.discord_qr_image_url;
+                if (!qrUrl) return message.channel.send('❌ QR Image belum dikonfigurasi di Admin Panel.');
+
+                await message.channel.send({
+                    content: '📸 **Scan QR di bawah untuk Pembayaran:**',
+                    files: [qrUrl]
+                });
+            }
+        }
     }
 });
 
@@ -107,7 +154,7 @@ client.on('interactionCreate', async (interaction) => {
                 .setCustomId('ticket_script_name')
                 .setLabel('Script Apa?')
                 .setStyle(TextInputStyle.Short)
-                .setPlaceholder('Contoh: IndoStrike / Vonixe Hub')
+                .setPlaceholder('Contoh: IndoStrike')
                 .setRequired(true);
 
             const issueInput = new TextInputBuilder()
@@ -236,10 +283,14 @@ async function createTicketChannel(interaction, channelName, categoryId, typeTit
             });
         }
 
-        await channel.send({ 
-            content: `<@${userId}> | Admin Team`, 
-            embeds: [embed], 
-            components: [closeButtonRow] 
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('close_ticket').setLabel('Close').setStyle(ButtonStyle.Danger).setEmoji('🔒')
+        );
+
+        await channel.send({
+            content: `<@${userId}> | Admin Team`,
+            embeds: [embed],
+            components: [row]
         });
 
         await interaction.editReply({ content: `✅ Ticket created: <#${channel.id}>` });
@@ -252,58 +303,42 @@ async function createTicketChannel(interaction, channelName, categoryId, typeTit
 
 // 2. Announcement Listener (Polling/Real-time)
 async function checkAnnouncements() {
-    // Reload config every time to get latest Channel IDs from Admin Panel
     await loadBotConfig();
-
     const { data, error } = await supabase
         .from('bot_announcements')
         .select('*')
         .eq('status', 'pending');
 
-    if (error) {
-        console.error('❌ Announcement Error:', error.message);
-        return;
-    }
+    if (error || !data || data.length === 0) return;
 
-    if (data && data.length > 0) {
-        const channelId = botConfig.discord_announcement_channel;
+    const channelId = botConfig.discord_announcement_channel;
+    if (!channelId) return;
 
-        if (!channelId) {
-            console.warn('⚠️ Announcement skipped: No Discord Channel ID configured in Admin Panel.');
-            return;
-        }
+    for (const announce of data) {
+        try {
+            const channel = await client.channels.fetch(channelId);
+            if (!channel) continue;
 
-        for (const announce of data) {
-            try {
-                const channel = await client.channels.fetch(channelId);
-                if (!channel) {
-                    console.error(`❌ Channel not found: ${channelId}`);
-                    continue;
-                }
+            const embed = new EmbedBuilder()
+                .setTitle(`✦ ${announce.title} ✦`)
+                .setDescription(announce.description)
+                .setColor(0xffa000)
+                .setTimestamp()
+                .setFooter({ text: 'Vonixe Hub • Community Updates' });
 
-                const embed = new EmbedBuilder()
-                    .setTitle(`✦ ${announce.title} ✦`)
-                    .setDescription(announce.description)
-                    .setColor(0xffa000)
-                    .setTimestamp()
-                    .setFooter({ text: 'Vonixe Hub • Community Updates', iconURL: client.user.displayAvatarURL() });
+            if (announce.image_url) embed.setImage(announce.image_url);
 
-                if (announce.image_url) {
-                    embed.setImage(announce.image_url);
-                }
+            await channel.send({
+                content: '<@&1395418057178091580> <@&1396200120139382886>', // Tag Member & Premium
+                embeds: [embed]
+            });
 
-                await channel.send({
-                    content: '@everyone @Update Log',
-                    embeds: [embed]
-                });
+            // Mark as sent
+            await supabase.from('bot_announcements').update({ status: 'sent' }).eq('id', announce.id);
+            console.log(`📢 Announcement sent: ${announce.title}`);
 
-                // Mark as sent
-                await supabase.from('bot_announcements').update({ status: 'sent' }).eq('id', announce.id);
-                console.log(`📢 Announcement sent: ${announce.title}`);
-
-            } catch (err) {
-                console.error(`❌ Failed to send announcement ${announce.id}:`, err.message);
-            }
+        } catch (err) {
+            console.error(`❌ Announcement Error:`, err.message);
         }
     }
 }
