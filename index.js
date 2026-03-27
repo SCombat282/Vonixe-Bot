@@ -34,14 +34,21 @@ const client = new Client({
 });
 
 // --- DEEP DEBUG ---
-client.on('debug', info => console.log(`[DJS DEBUG] ${info}`));
+client.on('debug', info => {
+    if (info.includes('heartbeat') || info.includes('latency')) return; // Filter out noise
+    console.log(`[DJS DEBUG] ${info}`);
+});
 client.on('error', err => console.error(`[DJS ERROR]`, err));
 
-const token = process.env.DISCORD_TOKEN?.trim();
+// AGGRESSIVE TOKEN CLEANUP (Remove ALL spaces/tabs/newlines)
+const rawToken = process.env.DISCORD_TOKEN || '';
+const token = rawToken.replace(/\s/g, ''); 
+
 console.log('📊 Token Info:', {
-    length: token?.length || 0,
-    prefix: token?.substring(0, 5) + '...',
-    isLikelyBotToken: token?.includes('.')
+    rawLength: rawToken.length,
+    cleanLength: token.length,
+    prefix: token.substring(0, 5) + '...',
+    hasSpacesRemoved: rawToken.length !== token.length
 });
 
 // --- BOT LOGIC ---
@@ -190,8 +197,9 @@ const loginTimeout = setTimeout(() => {
     console.error('❌ Login timeout: Bot took too long to connect. Pastikan TOKEN bener (Bot Token, bukan Client Secret) dan INTENTS di Developer Portal sudah ON semua!');
 }, 15000);
 
-client.login(process.env.DISCORD_TOKEN).then(() => {
+client.login(token).then(() => {
     clearTimeout(loginTimeout);
+    console.log(`✅ Login Success: ${client.user.tag}`);
 }).catch(err => {
     clearTimeout(loginTimeout);
     console.error('❌ Login failed:', err.message);
