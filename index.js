@@ -14,7 +14,12 @@ app.listen(port, () => {
     console.log(`📡 Server running on port ${port}`);
 });
 
-// --- CONFIGURATION ---
+// --- DEBUG LOGS ---
+console.log('🚀 Bot is starting...');
+console.log('📂 NODE_ENV:', process.env.NODE_ENV || 'development');
+console.log('🔑 Token exists:', !!process.env.DISCORD_TOKEN);
+console.log('🔗 Supabase URL exists:', !!process.env.SUPABASE_URL);
+
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
