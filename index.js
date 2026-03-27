@@ -68,7 +68,7 @@ client.on('messageCreate', async (message) => {
     const prefix = '.';
 
     // Auto-Responder logic (Merged into one beautiful Embed)
-    const keywords = ['getkey', 'cara get key', 'dimana key', 'buy premium', 'bantuan', 'tutor'];
+    const keywords = ['getkey', 'cara get key', 'dimana key', 'buy premium', 'bantuan', 'tutor', 'bug', 'error', 'help', 'support', 'premium'];
     if (keywords.some(k => content.includes(k))) {
         const embed = new EmbedBuilder()
             .setTitle('✦ Vonixe Hub - Community Navigation ✦')
