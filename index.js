@@ -419,7 +419,7 @@ client.on('ready', async () => {
                 };
 
                 try {
-                    const buffer = await fetchImage('https://i.imgur.com/yjSJoOE.png');
+                    const buffer = await fetchImage('https://media.discordapp.net/attachments/771388554093527085/1487203240851411044/vonixe_hub_logo-removebg-preview.png?ex=69c84973&is=69c6f7f3&hm=5bf8c4f6db13978e17a6d288196540f39e484b5aeb95a4ed482a597efced9d79&=&format=webp&quality=lossless&width=500&height=500');
                     console.log(`📑 Logo buffer received (Size: ${buffer.length} bytes)`);
                     
                     const dataUri = `data:image/png;base64,${buffer.toString('base64')}`;
