@@ -33,6 +33,17 @@ const client = new Client({
     ]
 });
 
+// --- DEEP DEBUG ---
+client.on('debug', info => console.log(`[DJS DEBUG] ${info}`));
+client.on('error', err => console.error(`[DJS ERROR]`, err));
+
+const token = process.env.DISCORD_TOKEN?.trim();
+console.log('📊 Token Info:', {
+    length: token?.length || 0,
+    prefix: token?.substring(0, 5) + '...',
+    isLikelyBotToken: token?.includes('.')
+});
+
 // --- BOT LOGIC ---
 
 let botConfig = {};
