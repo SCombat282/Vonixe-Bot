@@ -51,6 +51,20 @@ console.log('📊 Token Info:', {
     hasSpacesRemoved: rawToken.length !== token.length
 });
 
+// --- ULTIMATE TOKEN TEST (Bypass Library) ---
+fetch('https://discord.com/api/v10/users/@me', {
+    headers: { Authorization: `Bot ${token}` }
+})
+.then(res => res.json())
+.then(user => {
+    if (user.id) {
+        console.log(`✅ TEST SUCCESS! Token is VALID. Bot: ${user.username}#${user.discriminator}`);
+    } else {
+        console.error('❌ TEST FAILED! Discord say:', user.message);
+    }
+})
+.catch(err => console.error('❌ TEST ERROR (Network):', err.message));
+
 // --- BOT LOGIC ---
 
 let botConfig = {};
