@@ -55,12 +55,18 @@ console.log('📊 Token Info:', {
 fetch('https://discord.com/api/v10/users/@me', {
     headers: { Authorization: `Bot ${token}` }
 })
-.then(res => res.json())
-.then(user => {
-    if (user.id) {
-        console.log(`✅ TEST SUCCESS! Token is VALID. Bot: ${user.username}#${user.discriminator}`);
-    } else {
-        console.error('❌ TEST FAILED! Discord say:', user.message);
+.then(async res => {
+    const text = await res.text();
+    console.log(`📊 HTTP Status: ${res.status}`);
+    try {
+        const json = JSON.parse(text);
+        if (json.id) {
+            console.log(`✅ TEST SUCCESS! Bot: ${json.username}#${json.discriminator}`);
+        } else {
+            console.error('❌ TEST FAILED (API Error):', json.message);
+        }
+    } catch (e) {
+        console.error('❌ TEST FAILED (Not JSON):', text.substring(0, 200));
     }
 })
 .catch(err => console.error('❌ TEST ERROR (Network):', err.message));
