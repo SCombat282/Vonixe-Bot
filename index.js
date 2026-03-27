@@ -382,19 +382,30 @@ client.on('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
     await loadBotConfig();
 
-    // [ LOGIC FIX ] Create or Find Vonixe Logo Emoji
+    // [ LOGIC FIX ] Ensure branded emoji is ready
     try {
+        // Fetch all guilds first
+        await client.guilds.fetch();
         const guild = client.guilds.cache.first();
+        
         if (guild) {
+            console.log(`🔍 Checking emoji in guild: ${guild.name}`);
             await guild.emojis.fetch();
+            
             vonixeEmoji = guild.emojis.cache.find(e => e.name === 'vonixe_logo');
+            
             if (!vonixeEmoji) {
+                console.log('📦 Attempting to upload vonixe_logo emoji...');
                 vonixeEmoji = await guild.emojis.create({
                     attachment: 'https://i.imgur.com/yjSJoOE.png',
                     name: 'vonixe_logo'
                 });
                 console.log('✅ Created branded emoji: vonixe_logo');
+            } else {
+                console.log('✅ Found existing branded emoji');
             }
+        } else {
+            console.warn('⚠️ No guild found for emoji setup');
         }
     } catch (err) {
         console.error('⚠️ Could not setup logo emoji:', err.message);
