@@ -75,7 +75,7 @@ client.on('messageCreate', async (message) => {
 
         // Admin Commands
         if (message.member.permissions.has(PermissionFlagsBits.Administrator)) {
-            
+
             // 1. .setup-support
             if (command === 'setup-support') {
                 await message.delete().catch(() => { });
@@ -386,29 +386,52 @@ client.on('ready', async () => {
     try {
         await client.guilds.fetch();
         const guild = client.guilds.cache.first();
-        
+
         if (guild) {
             console.log(`🔍 Checking emoji in guild: ${guild.name}`);
             await guild.emojis.fetch();
             vonixeEmoji = guild.emojis.cache.find(e => e.name === 'vonixe_logo');
-            
-            if (!vonixeEmoji) {
-                console.log('📦 Fetching logo buffer to upload...');
-                const https = require('https');
-                const buffer = await new Promise((resolve, reject) => {
-                    https.get('https://i.imgur.com/yjSJoOE.png', (res) => {
-                        const chunks = [];
-                        res.on('data', (chunk) => chunks.push(chunk));
-                        res.on('end', () => resolve(Buffer.concat(chunks)));
-                        res.on('error', (err) => reject(err));
-                    }).on('error', (err) => reject(err));
-                });
 
-                vonixeEmoji = await guild.emojis.create({
-                    attachment: buffer,
-                    name: 'vonixe_logo'
-                });
-                console.log('✅ Created branded emoji: vonixe_logo');
+            if (!vonixeEmoji) {
+                console.log('📦 Fetching logo buffer to upload (with Headers)...');
+                const https = require('https');
+                
+                const fetchImage = (url) => {
+                    return new Promise((resolve, reject) => {
+                        const options = {
+                            headers: { 
+                                'User-Agent': 'Mozilla/5.0 (VonixeBot/1.0)',
+                                'Accept': 'image/png,image/*;q=0.8,*/*;q=0.5'
+                            }
+                        };
+                        https.get(url, options, (res) => {
+                            if (res.statusCode === 302 || res.statusCode === 301) {
+                                return fetchImage(res.headers.location).then(resolve).catch(reject);
+                            }
+                            if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
+                            
+                            const chunks = [];
+                            res.on('data', (chunk) => chunks.push(chunk));
+                            res.on('end', () => resolve(Buffer.concat(chunks)));
+                            res.on('error', (err) => reject(err));
+                        }).on('error', (err) => reject(err));
+                    });
+                };
+
+                try {
+                    const buffer = await fetchImage('https://i.imgur.com/yjSJoOE.png');
+                    console.log(`📑 Logo buffer received (Size: ${buffer.length} bytes)`);
+                    
+                    const dataUri = `data:image/png;base64,${buffer.toString('base64')}`;
+
+                    vonixeEmoji = await guild.emojis.create({
+                        attachment: dataUri,
+                        name: 'vonixe_logo'
+                    });
+                    console.log('✅ Created branded emoji: vonixe_logo');
+                } catch (fetchErr) {
+                    console.error('❌ Fetching failed:', fetchErr.message);
+                }
             } else {
                 console.log('✅ Found existing branded emoji');
             }
