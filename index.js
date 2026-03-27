@@ -34,42 +34,11 @@ const client = new Client({
 });
 
 // --- DEEP DEBUG ---
-client.on('debug', info => {
-    if (info.includes('heartbeat') || info.includes('latency')) return; // Filter out noise
-    console.log(`[DJS DEBUG] ${info}`);
-});
 client.on('error', err => console.error(`[DJS ERROR]`, err));
 
 // AGGRESSIVE TOKEN CLEANUP (Remove ALL spaces/tabs/newlines)
 const rawToken = process.env.DISCORD_TOKEN || '';
 const token = rawToken.replace(/\s/g, ''); 
-
-console.log('📊 Token Info:', {
-    rawLength: rawToken.length,
-    cleanLength: token.length,
-    prefix: token.substring(0, 5) + '...',
-    hasSpacesRemoved: rawToken.length !== token.length
-});
-
-// --- ULTIMATE TOKEN TEST (Bypass Library) ---
-fetch('https://discord.com/api/v10/users/@me', {
-    headers: { Authorization: `Bot ${token}` }
-})
-.then(async res => {
-    const text = await res.text();
-    console.log(`📊 HTTP Status: ${res.status}`);
-    try {
-        const json = JSON.parse(text);
-        if (json.id) {
-            console.log(`✅ TEST SUCCESS! Bot: ${json.username}#${json.discriminator}`);
-        } else {
-            console.error('❌ TEST FAILED (API Error):', json.message);
-        }
-    } catch (e) {
-        console.error('❌ TEST FAILED (Not JSON):', text.substring(0, 200));
-    }
-})
-.catch(err => console.error('❌ TEST ERROR (Network):', err.message));
 
 // --- BOT LOGIC ---
 
