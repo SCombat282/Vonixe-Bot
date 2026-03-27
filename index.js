@@ -67,31 +67,14 @@ client.on('messageCreate', async (message) => {
     const content = message.content.toLowerCase();
     const prefix = '.';
 
-    // Auto-Responder logic (Merged into one beautiful Embed)
-    const keywords = ['getkey', 'cara get key', 'dimana key', 'buy premium', 'bantuan', 'tutor', 'bug', 'error', 'help', 'support', 'premium'];
-    if (keywords.some(k => content.includes(k))) {
-        const embed = new EmbedBuilder()
-            .setTitle('✦ Vonixe Hub - Community Navigation ✦')
-            .setDescription('Halo! Berikut adalah panduan cepat untuk akses Vonixe Hub:')
-            .addFields(
-                { name: '🔑 Get Key', value: 'Silakan kunjungi <#1483881102127927477>', inline: true },
-                { name: '🎫 Support/Bug', value: 'Buat ticket di <#1395413976925339730>', inline: true },
-                { name: '💎 Buy Premium', value: 'Informasi ada di <#1487160999189549086>', inline: true }
-            )
-            .setColor(0xffa000)
-            .setFooter({ text: 'Gunakan tombol di channel terkait untuk respon cepat.' });
-
-        return message.reply({ embeds: [embed] });
-    }
-
-    // Command Handlers
+    // PRIORITY 1: Command Handlers (Check for prefix first!)
     if (content.startsWith(prefix)) {
         const args = content.slice(prefix.length).trim().split(/ +/);
         const command = args.shift().toLowerCase();
 
         // Admin Commands
         if (message.member.permissions.has(PermissionFlagsBits.Administrator)) {
-
+            
             // 1. .setup-support
             if (command === 'setup-support') {
                 await message.delete().catch(() => { });
@@ -104,7 +87,7 @@ client.on('messageCreate', async (message) => {
                     new ButtonBuilder().setCustomId('create_ticket_support').setLabel('Create Support Ticket').setStyle(ButtonStyle.Primary).setEmoji('🎫')
                 );
 
-                await message.channel.send({ embeds: [embed], components: [row] });
+                return message.channel.send({ embeds: [embed], components: [row] });
             }
 
             // 2. .setup-premium
@@ -119,7 +102,7 @@ client.on('messageCreate', async (message) => {
                     new ButtonBuilder().setCustomId('create_ticket_premium').setLabel('Buy / Renew Premium').setStyle(ButtonStyle.Success).setEmoji('⭐')
                 );
 
-                await message.channel.send({ embeds: [embed], components: [row] });
+                return message.channel.send({ embeds: [embed], components: [row] });
             }
 
             // 3. .qr
@@ -136,9 +119,27 @@ client.on('messageCreate', async (message) => {
                     .setColor(0x00ff00)
                     .setFooter({ text: 'Mohon kirim bukti transfer ke ticket setelah membayar.' });
 
-                await message.channel.send({ embeds: [embed] });
+                return message.channel.send({ embeds: [embed] });
             }
         }
+        return; // Stop if it was a command (even if failed)
+    }
+
+    // PRIORITY 2: Auto-Responder logic (Only if NOT a command)
+    const keywords = ['getkey', 'cara get key', 'dimana key', 'buy premium', 'bantuan', 'tutor', 'bug', 'error', 'help', 'support', 'premium'];
+    if (keywords.some(k => content.includes(k))) {
+        const embed = new EmbedBuilder()
+            .setTitle('✦ Vonixe Hub - Community Navigation ✦')
+            .setDescription('Halo! Berikut adalah panduan cepat untuk akses Vonixe Hub:')
+            .addFields(
+                { name: '🔑 Get Key', value: 'Silakan kunjungi <#1483881102127927477>', inline: true },
+                { name: '🎫 Support/Bug', value: 'Buat ticket di <#1395413976925339730>', inline: true },
+                { name: '💎 Buy Premium', value: 'Informasi ada di <#1487160999189549086>', inline: true }
+            )
+            .setColor(0xffa000)
+            .setFooter({ text: 'Gunakan tombol di channel terkait untuk respon cepat.' });
+
+        return message.reply({ embeds: [embed] });
     }
 });
 
