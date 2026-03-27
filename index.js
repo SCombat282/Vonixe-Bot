@@ -125,14 +125,18 @@ client.on('messageCreate', async (message) => {
             // 3. .qr
             if (command === 'qr') {
                 await message.delete().catch(() => { });
-                await loadBotConfig(); // Ensure latest config
+                await loadBotConfig();
                 const qrUrl = botConfig.discord_qr_image_url;
                 if (!qrUrl) return message.channel.send('❌ QR Image belum dikonfigurasi di Admin Panel.');
 
-                await message.channel.send({
-                    content: '📸 **Scan QR di bawah untuk Pembayaran:**',
-                    files: [qrUrl]
-                });
+                const embed = new EmbedBuilder()
+                    .setTitle('✦ QR Pembayaran Vonixe Hub ✦')
+                    .setDescription('Scan QR di bawah ini untuk memproses pembayaran anda.')
+                    .setImage(qrUrl)
+                    .setColor(0x00ff00)
+                    .setFooter({ text: 'Mohon kirim bukti transfer ke ticket setelah membayar.' });
+
+                await message.channel.send({ embeds: [embed] });
             }
         }
     }
