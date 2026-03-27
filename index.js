@@ -175,6 +175,13 @@ client.on('ready', async () => {
 });
 
 console.log('📡 Connecting to Discord...');
-client.login(process.env.DISCORD_TOKEN).catch(err => {
+const loginTimeout = setTimeout(() => {
+    console.error('❌ Login timeout: Bot took too long to connect. Pastikan TOKEN bener (Bot Token, bukan Client Secret) dan INTENTS di Developer Portal sudah ON semua!');
+}, 15000);
+
+client.login(process.env.DISCORD_TOKEN).then(() => {
+    clearTimeout(loginTimeout);
+}).catch(err => {
+    clearTimeout(loginTimeout);
     console.error('❌ Login failed:', err.message);
 });
