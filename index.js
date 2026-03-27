@@ -384,28 +384,34 @@ client.on('ready', async () => {
 
     // [ LOGIC FIX ] Ensure branded emoji is ready
     try {
-        // Fetch all guilds first
         await client.guilds.fetch();
         const guild = client.guilds.cache.first();
         
         if (guild) {
             console.log(`🔍 Checking emoji in guild: ${guild.name}`);
             await guild.emojis.fetch();
-            
             vonixeEmoji = guild.emojis.cache.find(e => e.name === 'vonixe_logo');
             
             if (!vonixeEmoji) {
-                console.log('📦 Attempting to upload vonixe_logo emoji...');
+                console.log('📦 Fetching logo buffer to upload...');
+                const https = require('https');
+                const buffer = await new Promise((resolve, reject) => {
+                    https.get('https://i.imgur.com/yjSJoOE.png', (res) => {
+                        const chunks = [];
+                        res.on('data', (chunk) => chunks.push(chunk));
+                        res.on('end', () => resolve(Buffer.concat(chunks)));
+                        res.on('error', (err) => reject(err));
+                    }).on('error', (err) => reject(err));
+                });
+
                 vonixeEmoji = await guild.emojis.create({
-                    attachment: 'https://i.imgur.com/yjSJoOE.png',
+                    attachment: buffer,
                     name: 'vonixe_logo'
                 });
                 console.log('✅ Created branded emoji: vonixe_logo');
             } else {
                 console.log('✅ Found existing branded emoji');
             }
-        } else {
-            console.warn('⚠️ No guild found for emoji setup');
         }
     } catch (err) {
         console.error('⚠️ Could not setup logo emoji:', err.message);
