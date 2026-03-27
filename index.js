@@ -294,7 +294,7 @@ async function createTicketChannel(interaction, channelName, categoryId, typeTit
         );
 
         await channel.send({
-            content: `<@${userId}> | Admin Team`,
+            content: `<@${userId}> | <@&1393271773134323792> <@&1395410641698816152>`,
             embeds: [embed],
             components: [row]
         });
