@@ -174,6 +174,7 @@ client.on('ready', async () => {
     setInterval(checkAnnouncements, 30000);
 });
 
+console.log('📡 Connecting to Discord...');
 client.login(process.env.DISCORD_TOKEN).catch(err => {
     console.error('❌ Login failed:', err.message);
 });
