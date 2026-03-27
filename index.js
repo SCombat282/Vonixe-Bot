@@ -1,5 +1,8 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
+const {
+    Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits,
+    ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder
+} = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 const express = require('express');
 
@@ -38,7 +41,7 @@ client.on('error', err => console.error(`[DJS ERROR]`, err));
 
 // AGGRESSIVE TOKEN CLEANUP (Remove ALL spaces/tabs/newlines)
 const rawToken = process.env.DISCORD_TOKEN || '';
-const token = rawToken.replace(/\s/g, ''); 
+const token = rawToken.replace(/\s/g, '');
 
 // --- BOT LOGIC ---
 
@@ -58,7 +61,7 @@ async function loadBotConfig() {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     const content = message.content.toLowerCase();
-    
+
     // Auto-Responder logic
     const keywords = {
         'getkey': 'Tutorial ambil key ada di channel <#1395409923059482696>',
@@ -79,7 +82,8 @@ client.on('messageCreate', async (message) => {
             .setColor(0xffa000);
 
         const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('create_ticket').setLabel('Create Ticket').setStyle(ButtonStyle.Primary).setEmoji('🎫'),
+            new ButtonBuilder().setCustomId('create_ticket_support').setLabel('Support').setStyle(ButtonStyle.Primary).setEmoji('🎫'),
+            new ButtonBuilder().setCustomId('create_ticket_premium').setLabel('Premium').setStyle(ButtonStyle.Success).setEmoji('⭐'),
             new ButtonBuilder().setLabel('Buy Premium').setStyle(ButtonStyle.Link).setURL('https://vonixehub.my.id').setEmoji('💎')
         );
 
@@ -89,43 +93,168 @@ client.on('messageCreate', async (message) => {
 
 // 2. Interaction Listener (Tickets)
 client.on('interactionCreate', async (interaction) => {
-    if (!interaction.isButton()) return;
+    if (interaction.isButton()) {
+        const userId = interaction.user.id;
+        const userName = interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-    if (interaction.customId === 'create_ticket') {
-        const guild = interaction.guild;
-        const categoryId = botConfig.discord_ticket_category;
+        if (interaction.customId === 'create_ticket_support') {
+            // Show Modal for Support
+            const modal = new ModalBuilder()
+                .setCustomId('modal_support_ticket')
+                .setTitle('Support Ticket Form');
 
+            const scriptInput = new TextInputBuilder()
+                .setCustomId('ticket_script_name')
+                .setLabel('Script Apa?')
+                .setStyle(TextInputStyle.Short)
+                .setPlaceholder('Contoh: IndoStrike / Vonixe Hub')
+                .setRequired(true);
+
+            const issueInput = new TextInputBuilder()
+                .setCustomId('ticket_issue_summary')
+                .setLabel('Apa yang terjadi sama scriptnya?')
+                .setStyle(TextInputStyle.Short)
+                .setPlaceholder('Contoh: Gak bisa load / Error key')
+                .setRequired(true);
+
+            const descInput = new TextInputBuilder()
+                .setCustomId('ticket_issue_desc')
+                .setLabel('Jelaskan detail bug/keluhannya')
+                .setStyle(TextInputStyle.Paragraph)
+                .setPlaceholder('Jelaskan sedetail mungkin di sini...')
+                .setRequired(true);
+
+            modal.addComponents(
+                new ActionRowBuilder().addComponents(scriptInput),
+                new ActionRowBuilder().addComponents(issueInput),
+                new ActionRowBuilder().addComponents(descInput)
+            );
+
+            await interaction.showModal(modal);
+        }
+
+        if (interaction.customId === 'create_ticket_premium') {
+            const row = new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder()
+                    .setCustomId('select_premium_type')
+                    .setPlaceholder('Pilih jenis layanan premium...')
+                    .addOptions(
+                        new StringSelectMenuOptionBuilder()
+                            .setLabel('Beli Premium Baru')
+                            .setDescription('Saya ingin membeli durasi premium baru')
+                            .setValue('buy_premium')
+                            .setEmoji('💎'),
+                        new StringSelectMenuOptionBuilder()
+                            .setLabel('Perpanjang Premium')
+                            .setDescription('Saya ingin memperpanjang durasi yang sudah ada')
+                            .setValue('renew_premium')
+                            .setEmoji('⏳')
+                    )
+            );
+
+            await interaction.reply({
+                content: '🛒 **Pilih jenis produk yang ingin dibeli:**',
+                components: [row],
+                ephemeral: true
+            });
+        }
+
+        if (interaction.customId === 'close_ticket') {
+            await interaction.reply('🔒 Tiket ini akan ditutup dalam 5 detik...');
+            setTimeout(() => interaction.channel.delete().catch(e => console.error('❌ Delete Error:', e)), 5000);
+        }
+    }
+
+    // Handle Selection Menu
+    if (interaction.isStringSelectMenu()) {
+        if (interaction.customId === 'select_premium_type') {
+            await interaction.deferUpdate(); // Acknowledge the menu
+
+            const choice = interaction.values[0];
+            const userName = interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const categoryId = botConfig.discord_premium_category || botConfig.discord_ticket_category;
+
+            let prefix = 'premium';
+            let title = 'Buy Premium';
+
+            if (choice === 'renew_premium') {
+                prefix = 'perpanjang';
+                title = 'Renew Premium';
+            }
+
+            const channelName = `${prefix}-${userName}`;
+            await createTicketChannel(interaction, channelName, categoryId, title);
+        }
+    }
+
+    // Handle Modal Submission
+    if (interaction.isModalSubmit()) {
+        if (interaction.customId === 'modal_support_ticket') {
+            await interaction.deferReply({ ephemeral: true });
+
+            const scriptName = interaction.fields.getTextInputValue('ticket_script_name');
+            const summary = interaction.fields.getTextInputValue('ticket_issue_summary');
+            const desc = interaction.fields.getTextInputValue('ticket_issue_desc');
+            const userName = interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+            const categoryId = botConfig.discord_ticket_category;
+            const channelName = `support-${userName}`;
+
+            await createTicketChannel(interaction, channelName, categoryId, 'Bug Report / Support', {
+                'Script': scriptName,
+                'Issue': summary,
+                'Detail': desc
+            });
+        }
+    }
+});
+
+async function createTicketChannel(interaction, channelName, categoryId, typeTitle, formData = null) {
+    const guild = interaction.guild;
+    const userId = interaction.user.id;
+
+    try {
         const channel = await guild.channels.create({
-            name: `ticket-${interaction.user.username}`,
-            type: ChannelType.GuildText,
-            parent: categoryId || null,
+            name: channelName,
+            type: ChannelType.GuildText, // Text Channel
+            parent: categoryId,
             permissionOverwrites: [
-                { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-                { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
+                { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] }, // @everyone: No view
+                { id: userId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }, // User: View, Send, History
             ]
         });
 
         const embed = new EmbedBuilder()
-            .setTitle('🎫 Welcome to Support')
-            .setDescription(`Halo ${interaction.user}, silakan jelaskan kendala kamu. Staff kami akan segera membantu.`)
-            .setColor(0x50dc78);
+            .setTitle(`🎫 ${typeTitle}`)
+            .setDescription(`Halo <@${userId}>, Staff akan segera melayani anda.`)
+            .setColor(0x00ff00)
+            .setTimestamp();
 
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('close_ticket').setLabel('Close Ticket').setStyle(ButtonStyle.Danger).setEmoji('🔒')
-        );
+        if (formData) {
+            Object.keys(formData).forEach(key => {
+                embed.addFields({ name: key, value: formData[key] });
+            });
+        }
 
-        await channel.send({ content: `${interaction.user} <@&ID_STAFF_ROLE>`, embeds: [embed], components: [row] });
-        await interaction.reply({ content: `Ticket created: ${channel}`, ephemeral: true });
+        await channel.send({ 
+            content: `<@${userId}> | Admin Team`, 
+            embeds: [embed], 
+            components: [closeButtonRow] 
+        });
+
+        await interaction.editReply({ content: `✅ Ticket created: <#${channel.id}>` });
+
+    } catch (err) {
+        console.error('❌ Ticket Error:', err);
+        await interaction.editReply({ content: `❌ Gagal membuat tiket. Pastikan Bot punya izin Manage Channels.` });
     }
-
-    if (interaction.customId === 'close_ticket') {
-        await interaction.reply('Closing ticket in 5 seconds...');
-        setTimeout(() => interaction.channel.delete(), 5000);
-    }
-});
+}
 
 // 2. Announcement Listener (Polling/Real-time)
 async function checkAnnouncements() {
+    // Reload config every time to get latest Channel IDs from Admin Panel
+    await loadBotConfig();
+
     const { data, error } = await supabase
         .from('bot_announcements')
         .select('*')
@@ -137,13 +266,20 @@ async function checkAnnouncements() {
     }
 
     if (data && data.length > 0) {
+        const channelId = botConfig.discord_announcement_channel;
+
+        if (!channelId) {
+            console.warn('⚠️ Announcement skipped: No Discord Channel ID configured in Admin Panel.');
+            return;
+        }
+
         for (const announce of data) {
             try {
-                const channelId = botConfig.discord_announcement_channel;
-                if (!channelId) continue;
-
                 const channel = await client.channels.fetch(channelId);
-                if (!channel) continue;
+                if (!channel) {
+                    console.error(`❌ Channel not found: ${channelId}`);
+                    continue;
+                }
 
                 const embed = new EmbedBuilder()
                     .setTitle(`✦ ${announce.title} ✦`)
@@ -156,9 +292,9 @@ async function checkAnnouncements() {
                     embed.setImage(announce.image_url);
                 }
 
-                await channel.send({ 
+                await channel.send({
                     content: '@everyone @Update Log',
-                    embeds: [embed] 
+                    embeds: [embed]
                 });
 
                 // Mark as sent
@@ -176,7 +312,7 @@ async function checkAnnouncements() {
 client.on('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
     await loadBotConfig();
-    
+
     // Check for announcements every 30 seconds
     setInterval(checkAnnouncements, 30000);
 });
