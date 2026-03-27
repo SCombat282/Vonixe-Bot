@@ -46,6 +46,7 @@ const token = rawToken.replace(/\s/g, '');
 // --- BOT LOGIC ---
 
 let botConfig = {};
+let vonixeEmoji = null; // Store logo emoji here
 
 async function loadBotConfig() {
     try {
@@ -324,18 +325,46 @@ async function checkAnnouncements() {
             const channel = await client.channels.fetch(channelId);
             if (!channel) continue;
 
+            // [ LOGIC FIX ] Resolve channel names like #general to <#ID>
+            let processedDesc = announce.description;
+            const guild = channel.guild;
+            if (guild) {
+                // Fetch all channels to ensure cache is up to date
+                await guild.channels.fetch();
+                const channelNames = processedDesc.match(/#([a-z0-9-]+)/gi);
+                if (channelNames) {
+                    for (const nameWithHash of channelNames) {
+                        const cleanName = nameWithHash.substring(1);
+                        const targetChan = guild.channels.cache.find(c => c.name.toLowerCase() === cleanName.toLowerCase());
+                        if (targetChan) {
+                            processedDesc = processedDesc.replace(nameWithHash, `<#${targetChan.id}>`);
+                        }
+                    }
+                }
+            }
+
             const embed = new EmbedBuilder()
                 .setTitle(`✦ ${announce.title} ✦`)
-                .setDescription(announce.description)
+                .setDescription(processedDesc)
                 .setColor(0xffa000)
                 .setTimestamp()
                 .setFooter({ text: 'Vonixe Hub • Community Updates' });
 
             if (announce.image_url) embed.setImage(announce.image_url);
 
+            // [ UI FIX ] Add Branded Website Button
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setLabel('Vonixe Hub Website')
+                    .setURL('https://vonixehub.my.id')
+                    .setStyle(ButtonStyle.Link)
+                    .setEmoji(vonixeEmoji ? vonixeEmoji.id : '🌐')
+            );
+
             await channel.send({
                 content: '<@&1395418057178091580> <@&1396200120139382886>', // Tag Member & Premium
-                embeds: [embed]
+                embeds: [embed],
+                components: [row]
             });
 
             // Mark as sent
@@ -352,6 +381,24 @@ async function checkAnnouncements() {
 client.on('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
     await loadBotConfig();
+
+    // [ LOGIC FIX ] Create or Find Vonixe Logo Emoji
+    try {
+        const guild = client.guilds.cache.first();
+        if (guild) {
+            await guild.emojis.fetch();
+            vonixeEmoji = guild.emojis.cache.find(e => e.name === 'vonixe_logo');
+            if (!vonixeEmoji) {
+                vonixeEmoji = await guild.emojis.create({
+                    attachment: 'https://i.imgur.com/yjSJoOE.png',
+                    name: 'vonixe_logo'
+                });
+                console.log('✅ Created branded emoji: vonixe_logo');
+            }
+        }
+    } catch (err) {
+        console.error('⚠️ Could not setup logo emoji:', err.message);
+    }
 
     // Check for announcements every 30 seconds
     setInterval(checkAnnouncements, 30000);
