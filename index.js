@@ -3,6 +3,7 @@ const {
     Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits,
     ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder
 } = require('discord.js');
+const { joinVoiceChannel, getVoiceConnection } = require('@discordjs/voice');
 const { createClient } = require('@supabase/supabase-js');
 const express = require('express');
 
@@ -121,6 +122,42 @@ client.on('messageCreate', async (message) => {
                     .setFooter({ text: 'Mohon kirim bukti transfer ke ticket setelah membayar.' });
 
                 return message.channel.send({ embeds: [embed] });
+            }
+
+            // 4. .joinvoice
+            if (command === 'joinvoice') {
+                await message.delete().catch(() => { });
+                const channelId = args[0];
+                if (!channelId) return message.channel.send('❌ Penggunaan: `.joinvoice <id_voice_channel>`');
+
+                const voiceChannel = message.guild.channels.cache.get(channelId);
+                if (!voiceChannel || voiceChannel.type !== ChannelType.GuildVoice && voiceChannel.type !== ChannelType.GuildStageVoice) {
+                    return message.channel.send('❌ Channel tidak ditemukan atau bukan Voice Channel.');
+                }
+
+                try {
+                    joinVoiceChannel({
+                        channelId: voiceChannel.id,
+                        guildId: message.guild.id,
+                        adapterCreator: message.guild.voiceAdapterCreator,
+                        selfDeaf: false,
+                        selfMute: true,
+                    });
+                    return message.channel.send(`✅ Berhasil masuk ke Voice Channel <#${voiceChannel.id}> dan idle 24/7.`);
+                } catch (err) {
+                    console.error('Voice Join Error:', err);
+                    return message.channel.send(`❌ Gagal masuk ke Voice Channel: ${err.message}`);
+                }
+            }
+
+            // 5. .leavevoice
+            if (command === 'leavevoice') {
+                await message.delete().catch(() => { });
+                const connection = getVoiceConnection(message.guild.id);
+                if (!connection) return message.channel.send('❌ Bot sedang tidak berada di Voice Channel mana pun.');
+                
+                connection.destroy();
+                return message.channel.send('✅ Berhasil keluar dari Voice Channel.');
             }
         }
         return; // Stop if it was a command (even if failed)
