@@ -23,10 +23,48 @@ const port = process.env.SERVER_PORT || process.env.PORT || 30049;
 app.get('/', (req, res) => res.send('Bot is Online!'));
 app.get('/ping', (req, res) => res.send('Pong!'));
 
+app.use(express.json());
+app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+    res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    if (req.method === 'OPTIONS') return res.sendStatus(200);
+    next();
+});
+
+app.get('/api/admin/channels', (req, res) => {
+    try {
+        let guilds = [];
+        client.guilds.cache.forEach(guild => {
+            const textChannels = guild.channels.cache
+                .filter(c => c.type === 0 || c.type === 5) // Text & Announcement
+                .map(c => ({ id: c.id, name: c.name }));
+            if (textChannels.length > 0) {
+                guilds.push({ id: guild.id, name: guild.name, channels: textChannels });
+            }
+        });
+        res.json(guilds);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/admin/announce', async (req, res) => {
+    try {
+        const { channelId, embed } = req.body;
+        const channel = await client.channels.fetch(channelId);
+        if (!channel) return res.status(404).json({ error: 'Channel not found' });
+        await channel.send({ embeds: [embed] });
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.post('/api/sellauth/dynamic', async (req, res) => {
     // Gunakan URL ini di Sellauth Dynamic Product: 
     // https://domain-bot-kamu.com/api/sellauth/dynamic?duration=LIFETIME&secret=RAHASIA
-    
+
     const secret = req.query.secret;
     if (secret !== (process.env.SELLAUTH_SECRET || 'vonixe123')) {
         return res.status(401).send('Unauthorized');
@@ -34,7 +72,7 @@ app.post('/api/sellauth/dynamic', async (req, res) => {
 
     const durationInput = req.query.duration || 'LIFETIME';
     const cleanDurationStr = durationInput.toUpperCase();
-    
+
     // Fungsi generateRandomString
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let randStr = '';
@@ -120,7 +158,7 @@ function generateRandomString(length) {
 async function queryWithTimeout(queryPromise, timeoutMs = 7000) {
     let timer;
     const timeout = new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error('⏱️ Database timeout')), timeoutMs);
+        timer = setTimeout(() => reject(new Error('⏱ Database timeout')), timeoutMs);
     });
     try {
         const result = await Promise.race([queryPromise, timeout]);
@@ -156,7 +194,7 @@ async function sendAuditLog(client, title, description, color = 0x00FF00) {
         if (!fs.existsSync('logs_config.json')) return;
         const config = JSON.parse(fs.readFileSync('logs_config.json', 'utf8'));
         if (!config.channel_id) return;
-        
+
         const channel = await client.channels.fetch(config.channel_id);
         if (channel) {
             const embed = new EmbedBuilder()
@@ -193,14 +231,14 @@ client.once('ready', async () => {
         try {
             console.log('[Auto-Purge] Cleaning up expired keys...');
             const now = new Date().toISOString();
-            
+
             // Delete expired Free Keys
             await supabase.from('active_keys').delete().lt('expires_at', now);
             await supabase.from('pending_free_keys').delete().lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()); // delete pending older than 24h
-            
+
             // Delete expired Premium Keys
             await supabase.from('active_premium_keys').delete().lt('expires_at', now);
-            
+
             console.log('[Auto-Purge] Cleanup complete.');
         } catch (e) {
             console.error('[Auto-Purge] Error:', e.message);
@@ -216,14 +254,14 @@ client.once('ready', async () => {
             .setDescription('Give a Premium Key to a Server Booster (Admin only)')
             .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
             .addUserOption(option => option.setName('user').setDescription('The user who boosted').setRequired(true))
-            .addStringOption(option => 
+            .addStringOption(option =>
                 option.setName('type')
-                .setDescription('Type of Boost')
-                .setRequired(true)
-                .addChoices(
-                    { name: '1x Boost (Temporary)', value: 'BOOST' },
-                    { name: '2x Boost (Lifetime)', value: 'LIFETIME' }
-                )
+                    .setDescription('Type of Boost')
+                    .setRequired(true)
+                    .addChoices(
+                        { name: '1x Boost (Temporary)', value: 'BOOST' },
+                        { name: '2x Boost (Lifetime)', value: 'LIFETIME' }
+                    )
             ),
         new SlashCommandBuilder()
             .setName('setupsupport')
@@ -332,7 +370,7 @@ client.on('messageCreate', async (message) => {
     const keywords = ['getkey', 'cara get key', 'dimana key', 'buy premium', 'bantuan', 'tutor', 'bug', 'error', 'help', 'support', 'premium'];
     if (keywords.some(k => content.includes(k))) {
         const embed = new EmbedBuilder()
-            .setTitle('✦ Vonixe Hub - Community Navigation ✦')
+            .setTitle(' Vonixe Hub - Community Navigation ')
             .setDescription('**[ID]** Halo! Berikut adalah panduan cepat untuk akses Vonixe Hub:\n**[EN]** Hello! Here is a quick guide to access Vonixe Hub:')
             .addFields(
                 { name: ' Get Key', value: '**[ID]** Kunjungi <#1483881102127927477>\n**[EN]** Visit <#1483881102127927477>', inline: true },
@@ -366,7 +404,7 @@ client.on('interactionCreate', async (interaction) => {
 
             if (command === 'setupsupport') {
                 const embed = new EmbedBuilder()
-                    .setTitle('✦ Vonixe Support Center ✦')
+                    .setTitle(' Vonixe Support Center ')
                     .setDescription('**[ID]** Butuh bantuan, laporan bug, atau pertanyaan seputar script? Klik tombol di bawah ini untuk membuat tiket bantuan.\n\n**[EN]** Need help, want to report a bug, or have questions about the script? Click the button below to open a support ticket.')
                     .setColor(0x0099ff);
 
@@ -384,7 +422,7 @@ client.on('interactionCreate', async (interaction) => {
                 const pricePerm = botConfig.premium_key_price_permanent || '20.000';
 
                 const embed = new EmbedBuilder()
-                    .setTitle('✦ VIP SCRIPT ✦')
+                    .setTitle(' VIP SCRIPT ')
                     .setDescription(`Price: IDR ${pricePerm} expired: permanen\nPrice: IDR ${price30} expired: 7 hari\n\n1. Transfer sesuai nominal & bukti\n2. Tunggu admin membalas (jangan spam)\n3. save key setelah admin mengirim key\n\n---\n**[EN]**\nPrice: IDR ${pricePerm} (Lifetime)\nPrice: IDR ${price30} (7 Days)\n\n1. Transfer the exact amount & send proof\n2. Wait for admin response (do not spam)\n3. Save your key after admin sends it`)
                     .setColor(0xffa000);
 
@@ -400,7 +438,7 @@ client.on('interactionCreate', async (interaction) => {
                 const type = interaction.options.getString('type');
                 if (type === 'premium') {
                     const embed = new EmbedBuilder()
-                        .setTitle('✦ Vonixe Premium Panel ✦')
+                        .setTitle(' Vonixe Premium Panel ')
                         .setDescription('**[ID]** Kelola akses script Vonixe Hub Premium kamu. Gunakan tombol di bawah untuk Redeem Key, mendapatkan Script, atau Claim Role.\n\n**[EN]** Manage your script access for Vonixe Hub Premium. Use the buttons below to redeem your key, get the script, or grab your role.')
                         .setImage('https://i.imgur.com/buvIdbn.gif')
                         .setColor(0x50dc78);
@@ -422,7 +460,7 @@ client.on('interactionCreate', async (interaction) => {
 
                 if (type === 'free') {
                     const embed = new EmbedBuilder()
-                        .setTitle('✦ Vonixe Free Key ✦')
+                        .setTitle(' Vonixe Free Key ')
                         .setDescription('**[ID]** Dapatkan akses 24 Jam gratis ke Vonixe Hub dengan melewati checkpoint. Klik tombol di bawah ini!\n\n**[EN]** Get free 24-hour access to Vonixe Hub by completing a checkpoint. Click the button below!')
                         .setImage('https://i.imgur.com/buvIdbn.gif')
                         .setColor(0x0099ff);
@@ -434,7 +472,11 @@ client.on('interactionCreate', async (interaction) => {
                         new ButtonBuilder().setCustomId('btn_get_script_mobile_free').setLabel('Mobile').setStyle(ButtonStyle.Secondary)
                     );
 
-                    await interaction.channel.send({ embeds: [embed], components: [row] });
+                    const row2 = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId('btn_reset_hwid_free').setLabel('Reset HWID').setStyle(ButtonStyle.Danger)
+                    );
+
+                    await interaction.channel.send({ embeds: [embed], components: [row, row2] });
                     return await interaction.reply({ content: '[ID] Panel Gratis dibuat. / [EN] Free Panel created.', flags: 64 });
                 }
             }
@@ -445,7 +487,7 @@ client.on('interactionCreate', async (interaction) => {
                 if (!qrUrl) return await interaction.reply({ content: '[ID] QR Image belum dikonfigurasi. / [EN] QR Image not configured.', flags: 64 });
 
                 const embed = new EmbedBuilder()
-                    .setTitle('✦ QR Pembayaran / Payment QR ✦')
+                    .setTitle(' QR Pembayaran / Payment QR ')
                     .setDescription('**[ID]** Scan QR di bawah ini untuk memproses pembayaran Anda.\n**[EN]** Scan the QR below to process your payment.')
                     .setImage(qrUrl)
                     .setColor(0x00ff00)
@@ -483,21 +525,21 @@ client.on('interactionCreate', async (interaction) => {
                 console.log(`[DEBUG giveboost] Command received from ${interaction.user.tag}`);
                 const targetUser = interaction.options.getMember('user');
                 const boostType = interaction.options.getString('type');
-                
+
                 if (!targetUser) {
                     return await interaction.reply({ content: '[ID] User tidak valid! / [EN] Invalid user!', flags: 64 });
                 }
 
                 const newKeyStr = 'VONIXE-PREM-' + generateRandomString(12);
-                let expiresAt = boostType === 'LIFETIME' ? 'LIFETIME' : 'BOOST';
+                let expiresAt = boostType === 'LIFETIME' ? null : '8888-08-08T08:08:08.000Z';
 
-                console.log(`[DEBUG giveboost] Inserting key into active_premium_keys...`);
-                const { error: insertError } = await supabase.from('active_premium_keys').insert([{
+                console.log(`[DEBUG giveboost] Inserting key into hub_keys...`);
+                const { error: insertError } = await supabase.from('hub_keys').insert([{
                     key_string: newKeyStr,
+                    type: 'PREMIUM',
                     discord_id: targetUser.id,
-                    expires_at: expiresAt,
-                    hwid: null,
-                    ip_address: null
+                    discord_username: targetUser.user.username,
+                    expires_at: expiresAt
                 }]);
 
                 if (insertError) {
@@ -505,42 +547,49 @@ client.on('interactionCreate', async (interaction) => {
                     return await interaction.reply({ content: `[ID] Gagal membuat Boost Key: ${insertError.message} / [EN] Failed to create Boost Key: ${insertError.message}` });
                 }
 
-                let roleMsg = '';
+                let roleMsgID = '';
+                let roleMsgEN = '';
                 if (botConfig.discord_premium_role_id) {
                     try {
                         console.log(`[DEBUG giveboost] Adding premium role...`);
                         await targetUser.roles.add(botConfig.discord_premium_role_id);
-                        roleMsg = '\n Role Premium telah diberikan otomatis kepada user tersebut.';
+                        roleMsgID = '\n[ Role Premium ditambahkan ]';
+                        roleMsgEN = '\n[ Premium Role added ]';
                     } catch (e) {
                         console.log(`[DEBUG giveboost] Failed to add role:`, e.message);
-                        roleMsg = '\n (Gagal memberi role: bot kurang izin)';
+                        roleMsgID = '\n[ Gagal memberi role ]';
+                        roleMsgEN = '\n[ Failed to add role ]';
                     }
                 }
 
                 const dmEmbed = new EmbedBuilder()
-                    .setTitle('🎉 Terimakasih telah mem-boost Server Vonixe! 🎉')
-                    .setDescription(`Kamu mendapatkan akses Premium Script!\n\n**Key Kamu:**\n\`${newKeyStr}\`\n\n**Masa Aktif:** ${boostType === 'LIFETIME' ? 'Lifetime (Permanen)' : 'Selama kamu masih Boost Server ini'}\n\nGunakan key ini di executor kamu. Jangan berikan key ini ke siapapun!`)
+                    .setTitle('Thanks for Boosting Vonixe!')
+                    .setDescription(`[ID] Kamu mendapatkan akses Premium Script!\n[EN] You got Premium Script access!\n\n**Key:**\n\`${newKeyStr}\`\n\n**Duration:** ${boostType === 'LIFETIME' ? 'Lifetime' : 'While Boosting'}\n\n[ID] Gunakan key ini di executor kamu. Jangan bagikan ke siapapun!\n[EN] Use this key in your executor. Do not share it!`)
                     .setColor(0xffa000)
                     .setTimestamp();
 
-                let dmMsg = '';
+                let dmMsgID = '';
+                let dmMsgEN = '';
                 try {
                     await targetUser.send({ embeds: [dmEmbed] });
-                    dmMsg = '\n✅ Key telah dikirimkan ke DM user.';
+                    dmMsgID = '\n[ DM terkirim ]';
+                    dmMsgEN = '\n[ DM sent ]';
                 } catch (e) {
-                    dmMsg = '\n❌ Gagal mengirim DM ke user (mungkin DM mereka ditutup).';
+                    dmMsgID = '\n[ Gagal DM user ]';
+                    dmMsgEN = '\n[ Failed to DM user ]';
                 }
 
-                await sendAuditLog(interaction.client, '🚀 Server Boost Key Created', `**Admin:** <@${interaction.user.id}>\n**Target User:** <@${targetUser.id}>\n**Key:** \`${newKeyStr}\`\n**Type:** ${boostType}`, 0xffa000);
-                await interaction.reply({ content: `[ID] Berhasil memberikan Boost Key! <@${targetUser.id}>${roleMsg}${dmMsg} / [EN] Successfully gave Boost Key! <@${targetUser.id}>${roleMsg}${dmMsg}` });
+                await sendAuditLog(interaction.client, ' Server Boost Key Created', `**Admin:** <@${interaction.user.id}>\n**Target User:** <@${targetUser.id}>\n**Key:** \`${newKeyStr}\`\n**Type:** ${boostType}`, 0xffa000);
+                await interaction.reply({ content: `[ID] Sukses memberikan Boost Key! <@${targetUser.id}>${roleMsgID}${dmMsgID}\n\n[EN] Successfully gave Boost Key! <@${targetUser.id}>${roleMsgEN}${dmMsgEN}` });
                 return;
             }
 
-            if (command === 'givepremium') {                console.log(`[DEBUG giveprem] Command received from ${interaction.user.tag}`);
+            if (command === 'givepremium') {
+                console.log(`[DEBUG giveprem] Command received from ${interaction.user.tag}`);
                 const targetUser = interaction.options.getMember('user');
                 const durationInput = interaction.options.getString('duration');
                 console.log(`[DEBUG giveprem] targetUser: ${targetUser ? targetUser.id : 'null'}, duration: ${durationInput}`);
-                
+
                 const parsedMs = parseCustomDuration(durationInput);
                 if (!parsedMs) {
                     console.log(`[DEBUG giveprem] Invalid duration format`);
@@ -560,7 +609,7 @@ client.on('interactionCreate', async (interaction) => {
                     console.error(`[DEBUG giveprem] Supabase Error:`, error);
                     return await interaction.reply({ content: `[ID] Gagal membuat License Code: ${error.message} / [EN] Failed to create License Code: ${error.message}` });
                 }
-                
+
                 console.log(`[DEBUG giveprem] Supabase insert successful! Building embed...`);
 
                 const embed = new EmbedBuilder()
@@ -588,19 +637,20 @@ client.on('interactionCreate', async (interaction) => {
                 }
 
                 console.log(`[DEBUG giveprem] Sending reply...`);
-                await sendAuditLog(interaction.client, '? Premium License Created', `**Admin:** <@${interaction.user.id}>\n**Target User:** ${targetUser ? '<@'+targetUser.id+'>' : 'None'}\n**License Code:** \`${licenseCode}\`\n**Duration Input:** ${durationInput}`, 0x00FF00);
+                await sendAuditLog(interaction.client, '? Premium License Created', `**Admin:** <@${interaction.user.id}>\n**Target User:** ${targetUser ? '<@' + targetUser.id + '>' : 'None'}\n**License Code:** \`${licenseCode}\`\n**Duration Input:** ${durationInput}`, 0x00FF00);
                 await interaction.reply({ content: `[ID] Pembuatan License selesai! <@${targetUser ? targetUser.id : ''}> / [EN] License creation complete! <@${targetUser ? targetUser.id : ''}>${roleMsg}`, embeds: [embed] });
                 console.log(`[DEBUG giveprem] Done!`);
                 return;
             }
 
             if (command === 'checkkey') {
-                const keyToCheck = interaction.options.getString('key');                const { data, error } = await supabase.from('hub_keys').select('*').eq('key_string', keyToCheck).single();
+                const keyToCheck = interaction.options.getString('key');
+                const { data, error } = await supabase.from('hub_keys').select('*').eq('key_string', keyToCheck).single();
 
-                if (error || !data) return await interaction.reply({  content: `[ID] Key tidak ditemukan. / [EN] Key not found in database.` , flags: 64 });
+                if (error || !data) return await interaction.reply({ content: `[ID] Key tidak ditemukan. / [EN] Key not found in database.`, flags: 64 });
 
                 const embed = new EmbedBuilder()
-                    .setTitle('✦ Key Information ✦')
+                    .setTitle(' Key Information ')
                     .addFields(
                         { name: 'Key String', value: `\`${data.key_string}\`` },
                         { name: 'Type', value: data.type, inline: true },
@@ -610,20 +660,21 @@ client.on('interactionCreate', async (interaction) => {
                     )
                     .setColor(0x0099ff);
 
-                return await interaction.reply({  embeds: [embed] , flags: 64 });
+                return await interaction.reply({ embeds: [embed], flags: 64 });
             }
 
             if (command === 'editkey') {
                 const keyToEdit = interaction.options.getString('key');
                 const action = interaction.options.getString('action');
-                const durationInput = interaction.options.getString('duration');
+                const durationInput = interaction.options.getString('duration');
+
                 const parsedMs = parseCustomDuration(durationInput);
                 if (!parsedMs) {
-                    return await interaction.reply({  content: '[ID] Format durasi salah! / [EN] Invalid duration format!' , flags: 64 });
+                    return await interaction.reply({ content: '[ID] Format durasi salah! / [EN] Invalid duration format!', flags: 64 });
                 }
 
                 const { data: keyData, error: keyError } = await supabase.from('hub_keys').select('*').eq('key_string', keyToEdit).single();
-                if (keyError || !keyData) return await safeEditReply(interaction, ` Key \`${keyToEdit}\` tidak ditemukan di database.`);
+                if (keyError || !keyData) return await safeEditReply(interaction, `[ID] Key \`${keyToEdit}\` tidak ditemukan di database. / [EN] Key \`${keyToEdit}\` not found in database.`);
 
                 let newExpiresAt = null;
                 if (parsedMs !== 'LIFETIME') {
@@ -639,7 +690,7 @@ client.on('interactionCreate', async (interaction) => {
                 }
 
                 const { error: updateError } = await supabase.from('hub_keys').update({ expires_at: newExpiresAt }).eq('key_string', keyToEdit);
-                if (updateError) return await interaction.reply({  content: `[ID] Gagal mengupdate key: ${updateError.message} / [EN] Failed to update key: ${updateError.message}` , flags: 64 });
+                if (updateError) return await interaction.reply({ content: `[ID] Gagal mengupdate key: ${updateError.message} / [EN] Failed to update key: ${updateError.message}`, flags: 64 });
 
                 const embed = new EmbedBuilder()
                     .setTitle(' Key Updated Successfully')
@@ -650,22 +701,24 @@ client.on('interactionCreate', async (interaction) => {
                         { name: 'New Expiration', value: newExpiresAt ? new Date(newExpiresAt).toLocaleString() : 'LIFETIME' }
                     )
                     .setColor(0x00ff64);
-                return await interaction.reply({  embeds: [embed] , flags: 64 });
+                return await interaction.reply({ embeds: [embed], flags: 64 });
             }
 
             if (command === 'revokekey') {
-                const keyToRevoke = interaction.options.getString('key');                const { error } = await supabase.from('hub_keys').delete().eq('key_string', keyToRevoke);
-                if (error) return await interaction.reply({  content: `[ID] Gagal menghapus key: ${error.message} / [EN] Failed to delete key: ${error.message}` , flags: 64 });
-                return await safeEditReply(interaction, ` Key \`${keyToRevoke}\` berhasil dihapus secara permanen.`);
+                const keyToRevoke = interaction.options.getString('key');
+                const { error } = await supabase.from('hub_keys').delete().eq('key_string', keyToRevoke);
+                if (error) return await interaction.reply({ content: `[ID] Gagal menghapus key: ${error.message} / [EN] Failed to delete key: ${error.message}`, flags: 64 });
+                return await safeEditReply(interaction, `[ID] Key \`${keyToRevoke}\` berhasil dihapus secara permanen. / [EN] Key \`${keyToRevoke}\` successfully deleted permanently.`);
             }
 
             if (command === 'resetuser') {
-                const keyToReset = interaction.options.getString('key');                const { error } = await supabase.from('hub_keys').update({ hwid: null }).eq('key_string', keyToReset);
-                if (error) return await interaction.reply({  content: `[ID] Gagal mereset HWID: ${error.message} / [EN] Failed to reset HWID: ${error.message}` , flags: 64 });
-                return await safeEditReply(interaction, ` Berhasil! HWID binding untuk key \`${keyToReset}\` telah di-reset. Pembeli bisa memakainya di device baru.`);
+                const keyToReset = interaction.options.getString('key');
+                const { error } = await supabase.from('hub_keys').update({ hwid: null }).eq('key_string', keyToReset);
+                if (error) return await interaction.reply({ content: `[ID] Gagal mereset HWID: ${error.message} / [EN] Failed to reset HWID: ${error.message}`, flags: 64 });
+                return await safeEditReply(interaction, `[ID] Berhasil! HWID binding untuk key \`${keyToReset}\` telah di-reset. / [EN] Success! HWID binding for key \`${keyToReset}\` has been reset.`);
             }
 
-            
+
             if (command === 'setuplogs') {
                 const fs = require('fs');
                 fs.writeFileSync('logs_config.json', JSON.stringify({ channel_id: interaction.channelId }));
@@ -675,12 +728,12 @@ client.on('interactionCreate', async (interaction) => {
             if (command === 'mykey') {
                 await interaction.deferReply({ flags: 64 });
                 const userId = interaction.user.id;
-                
+
                 // Check Premium
                 const { data: premKeys } = await supabase.from('active_premium_keys').select('*').eq('discord_id', userId);
                 // Check Free
                 const { data: freeKeys } = await supabase.from('active_keys').select('*').eq('discord_id', userId);
-                
+
                 if ((!premKeys || premKeys.length === 0) && (!freeKeys || freeKeys.length === 0)) {
                     return await interaction.editReply({ content: '[ID] Kamu tidak memiliki key yang aktif saat ini. / [EN] You do not have any active keys.' });
                 }
@@ -689,7 +742,8 @@ client.on('interactionCreate', async (interaction) => {
                 if (premKeys && premKeys.length > 0) {
                     desc += '**? PREMIUM KEYS**\n';
                     premKeys.forEach(k => {
-                        const expired = k.expires_at === 'LIFETIME' ? 'Lifetime' : k.expires_at === 'BOOST' ? 'Active Boost' : `<t:${Math.floor(new Date(k.expires_at).getTime() / 1000)}:R>`;
+                        const isBoost = k.expires_at && k.expires_at.startsWith('8888');
+                        const expired = !k.expires_at ? 'Lifetime' : isBoost ? 'Active Boost' : `<t:${Math.floor(new Date(k.expires_at).getTime() / 1000)}:R>`;
                         desc += `Key: ` + `${k.key_string}` + `\nHWID: ${k.hwid || 'Belum di-bind'}\nExpired: ${expired}\n\n`;
                     });
                 }
@@ -704,7 +758,7 @@ client.on('interactionCreate', async (interaction) => {
                     .setTitle('? Status Key Kamu')
                     .setDescription(desc)
                     .setColor(0x00FF00);
-                
+
                 return await interaction.editReply({ embeds: [embed] });
             }
 
@@ -713,14 +767,14 @@ client.on('interactionCreate', async (interaction) => {
                 await interaction.reply({ content: '[ID] Menghapus channel spam... / [EN] Deleting spam channels...', flags: 64 });
                 const channels = interaction.guild.channels.cache.filter(c => c.name.toLowerCase().includes('raided') || c.name.toLowerCase().includes('sky'));
                 if (channels.size === 0) return await interaction.followUp({ content: '[ID] Tidak ada channel raid. / [EN] No raid channels found.', flags: 64 });
-                
+
                 let count = 0;
                 for (const [id, channel] of channels) {
-                    try { 
-                        await channel.delete(); 
-                        count++; 
-                        await new Promise(r => setTimeout(r, 400)); 
-                    } catch (e) {}
+                    try {
+                        await channel.delete();
+                        count++;
+                        await new Promise(r => setTimeout(r, 400));
+                    } catch (e) { }
                 }
                 await interaction.followUp({ content: `[ID] Selesai menghapus ${count} channel. / [EN] Finished deleting ${count} channels.`, flags: 64 });
                 return;
@@ -731,14 +785,14 @@ client.on('interactionCreate', async (interaction) => {
                 try {
                     const bans = await interaction.guild.bans.fetch();
                     if (bans.size === 0) return await interaction.followUp({ content: '[ID] Tidak ada member yang di-ban. / [EN] No banned members.', flags: 64 });
-                    
+
                     let count = 0;
                     for (const [id, ban] of bans) {
                         try {
                             await interaction.guild.bans.remove(id, 'Unban massal pasca raid');
                             count++;
                             await new Promise(r => setTimeout(r, 400));
-                        } catch (e) {}
+                        } catch (e) { }
                     }
                     await interaction.followUp({ content: `[ID] Berhasil unban ${count} member. / [EN] Successfully unbanned ${count} members.`, flags: 64 });
                 } catch (err) {
@@ -752,7 +806,7 @@ client.on('interactionCreate', async (interaction) => {
         const errMsg = String(err.message || err).substring(0, 1500);
         try {
             if (interaction.deferred || interaction.replied) {
-                await interaction.reply({  content: `[ID] Error: ${errMsg} / [EN] Error: ${errMsg}` , flags: 64 });
+                await interaction.reply({ content: `[ID] Error: ${errMsg} / [EN] Error: ${errMsg}`, flags: 64 });
             } else {
                 await interaction.reply({ content: `[ID] Error: ${errMsg} / [EN] Error: ${errMsg}`, flags: 64 });
             }
@@ -776,23 +830,23 @@ client.on('interactionCreate', async (interaction) => {
 
                 const scriptInput = new TextInputBuilder()
                     .setCustomId('ticket_script_name')
-                    .setLabel('Script Apa?')
+                    .setLabel('Script Name?')
                     .setStyle(TextInputStyle.Short)
-                    .setPlaceholder('Contoh: IndoStrike')
+                    .setPlaceholder('e.g. IndoStrike')
                     .setRequired(true);
 
                 const issueInput = new TextInputBuilder()
                     .setCustomId('ticket_issue_summary')
-                    .setLabel('Apa yang terjadi sama scriptnya?')
+                    .setLabel('What is the issue?')
                     .setStyle(TextInputStyle.Short)
-                    .setPlaceholder('Contoh: Gak bisa load / Error key')
+                    .setPlaceholder('e.g. Cannot load / Key error')
                     .setRequired(true);
 
                 const descInput = new TextInputBuilder()
                     .setCustomId('ticket_issue_desc')
-                    .setLabel('Jelaskan detail bug/keluhannya')
+                    .setLabel('Detail the bug/issue')
                     .setStyle(TextInputStyle.Paragraph)
-                    .setPlaceholder('Jelaskan sedetail mungkin di sini...')
+                    .setPlaceholder('Explain in detail here...')
                     .setRequired(true);
 
                 modal.addComponents(
@@ -808,23 +862,17 @@ client.on('interactionCreate', async (interaction) => {
                 const row = new ActionRowBuilder().addComponents(
                     new StringSelectMenuBuilder()
                         .setCustomId('select_premium_type')
-                        .setPlaceholder('Pilih jenis layanan premium...')
+                        .setPlaceholder('Select Premium Service...')
                         .addOptions(
-                            new StringSelectMenuOptionBuilder()
-                                .setLabel('Beli Premium Baru')
-                                .setDescription('Saya ingin membeli durasi premium baru')
-                                .setValue('buy_premium')
-                                ,
-                            new StringSelectMenuOptionBuilder()
-                                .setLabel('Perpanjang Premium')
-                                .setDescription('Saya ingin memperpanjang durasi yang sudah ada')
-                                .setValue('renew_premium')
-                                
+                            new StringSelectMenuOptionBuilder().setLabel('Buy New Premium').setDescription('Beli durasi baru / Buy new duration').setValue('buy_premium')
+                            ,
+                            new StringSelectMenuOptionBuilder().setLabel('Renew Premium').setDescription('Perpanjang durasi / Renew existing duration').setValue('renew_premium')
+
                         )
                 );
 
                 await interaction.reply({
-                    content: ' **Pilih jenis produk yang ingin dibeli:**',
+                    content: '[ID] Pilih layanan yang diinginkan: / [EN] Select the desired service:',
                     components: [row],
                     flags: 64
                 });
@@ -851,28 +899,82 @@ client.on('interactionCreate', async (interaction) => {
                 return await interaction.showModal(modal);
             }
 
-            if (interaction.customId === 'btn_get_free_key') {                await loadBotConfig();
+            if (interaction.customId === 'btn_get_free_key') {
+                await loadBotConfig();
                 const freeLink = (botConfig.free_key_link || 'https://vonixehub.my.id/getkey').replace('#getkey', 'getkey');
                 const embed = new EmbedBuilder()
-                    .setTitle('✦ Get Free Key ✦')
+                    .setTitle(' Get Free Key ')
                     .setDescription(`**[ID]** Silakan selesaikan checkpoint melalui link berikut untuk mendapatkan key gratis 24 jam:\n\n**[EN]** Please complete the checkpoint through the link below to get your free 24-hour key:\n\n� **[Click Here to Get Free Key](${freeLink})**`)
                     .setColor(0x0099ff);
-                return await interaction.reply({  embeds: [embed] , flags: 64 });
+                return await interaction.reply({ embeds: [embed], flags: 64 });
             }
 
-            if (interaction.customId === 'btn_get_script_free') {                await loadBotConfig();
+            if (interaction.customId === 'btn_get_script_free') {
+                await loadBotConfig();
                 const loadstringUrl = botConfig.roblox_loadstring_url || 'https://raw.githubusercontent.com/SCombat282/vonixehub/refs/heads/main/bootstrapper.lua';
                 const embed = new EmbedBuilder()
                     .setTitle('Loader Script')
                     .setDescription('Copy and paste this script into your executor:\n\n```lua\nloadstring(game:HttpGet("' + loadstringUrl + '"))()\n```')
                     .setColor(0x0099ff);
-                return await interaction.reply({  embeds: [embed] , flags: 64 });
+                return await interaction.reply({ embeds: [embed], flags: 64 });
             }
 
-            if (interaction.customId === 'btn_get_script_mobile_free') {                await loadBotConfig();
+            if (interaction.customId === 'btn_get_script_mobile_free') {
+                await loadBotConfig();
                 const loadstringUrl = botConfig.roblox_loadstring_url || 'https://raw.githubusercontent.com/SCombat282/vonixehub/refs/heads/main/bootstrapper.lua';
                 const code = `loadstring(game:HttpGet("${loadstringUrl}"))()`;
-                return await interaction.reply({  content: code , flags: 64 });
+                return await interaction.reply({ content: code, flags: 64 });
+            }
+
+            if (interaction.customId === 'btn_reset_hwid_free') {
+                let keys, error;
+                try {
+                    const result = await queryWithTimeout(
+                        supabase
+                            .from('hub_keys')
+                            .select('*')
+                            .eq('discord_id', userId)
+                            .eq('type', 'FREE')
+                            .order('created_at', { ascending: false })
+                    );
+                    keys = result.data;
+                    error = result.error;
+                } catch (timeoutErr) {
+                    return await interaction.reply({ content: '[ID] Database lambat, coba lagi sebentar. / [EN] Database slow, try again shortly.', flags: 64 });
+                }
+
+                if (error || !keys || keys.length === 0) {
+                    return await interaction.reply({ content: '[ID] Kamu belum memiliki Free Key. / [EN] You do not have a Free Key yet.', flags: 64 });
+                }
+
+                const activeKey = keys[0];
+                const now = new Date();
+                let canReset = true;
+                let remainingHours = 0;
+
+                if (activeKey.last_hwid_reset) {
+                    const lastReset = new Date(activeKey.last_hwid_reset);
+                    const diffTime = Math.abs(now - lastReset);
+                    const diffHours = diffTime / (1000 * 60 * 60);
+                    if (diffHours < 2) {
+                        canReset = false;
+                        remainingHours = (2 - diffHours).toFixed(1);
+                    }
+                }
+
+                if (!canReset) {
+                    return await interaction.reply({ content: `[ID] Masih cooldown. Tunggu **${remainingHours} jam**. / [EN] Still on cooldown. Wait **${remainingHours} hours**.`, flags: 64 });
+                }
+
+                const newCount = (activeKey.reset_count || 0) + 1;
+                const { error: resetError } = await supabase.from('hub_keys').update({
+                    hwid: null,
+                    last_hwid_reset: now.toISOString(),
+                    reset_count: newCount
+                }).eq('key_string', activeKey.key_string);
+
+                if (resetError) return await interaction.reply({ content: `[ID] Gagal mereset: ${resetError.message} / [EN] Failed to reset: ${resetError.message}`, flags: 64 });
+                return await interaction.reply({ content: '[ID] HWID Free berhasil di-reset! / [EN] Free HWID successfully reset!', flags: 64 });
             }
 
             if (interaction.customId === 'btn_redeem_premium') {
@@ -891,7 +993,8 @@ client.on('interactionCreate', async (interaction) => {
                 await interaction.showModal(modal);
             }
 
-            if (['btn_get_script', 'btn_get_script_mobile', 'btn_get_role', 'btn_reset_hwid', 'btn_get_stats'].includes(interaction.customId)) {                let keys, error;
+            if (['btn_get_script', 'btn_get_script_mobile', 'btn_get_role', 'btn_reset_hwid', 'btn_get_stats'].includes(interaction.customId)) {
+                let keys, error;
                 try {
                     const result = await queryWithTimeout(
                         supabase
@@ -904,13 +1007,14 @@ client.on('interactionCreate', async (interaction) => {
                     keys = result.data;
                     error = result.error;
                 } catch (timeoutErr) {
-                    return await interaction.reply({ 
-                        content: '❌ Database lambat, coba lagi sebentar. / Database slow, try again shortly.'
-                    , flags: 64 });
+                    return await interaction.reply({
+                        content: ' Database lambat, coba lagi sebentar. / Database slow, try again shortly.'
+                        , flags: 64
+                    });
                 }
 
                 if (error || !keys || keys.length === 0) {
-                    return await interaction.reply({  content: '[ID] Kamu belum memiliki Premium Key. / [EN] You do not have a Premium Key yet.' , flags: 64 });
+                    return await interaction.reply({ content: '[ID] Kamu belum memiliki Premium Key. / [EN] You do not have a Premium Key yet.', flags: 64 });
                 }
 
                 const activeKey = keys[0];
@@ -921,13 +1025,13 @@ client.on('interactionCreate', async (interaction) => {
                         .setTitle('Loader Script')
                         .setDescription('Copy and paste this script into your executor:\n\n```lua\ngetgenv().script_key="' + activeKey.key_string + '";\nloadstring(game:HttpGet("' + loadstringUrl + '"))()\n```\n\n **Don\'t share your key or script with anyone else!**')
                         .setColor(0x50dc78);
-                    return await interaction.reply({  embeds: [embed] , flags: 64 });
+                    return await interaction.reply({ embeds: [embed], flags: 64 });
                 }
 
                 if (interaction.customId === 'btn_get_script_mobile') {
                     const loadstringUrl = botConfig.roblox_loadstring_url || 'https://raw.githubusercontent.com/SCombat282/vonixehub/refs/heads/main/bootstrapper.lua';
                     const code = `getgenv().script_key="${activeKey.key_string}";\nloadstring(game:HttpGet("${loadstringUrl}"))()`;
-                    return await interaction.reply({  content: code , flags: 64 });
+                    return await interaction.reply({ content: code, flags: 64 });
                 }
 
                 if (interaction.customId === 'btn_get_role') {
@@ -935,12 +1039,12 @@ client.on('interactionCreate', async (interaction) => {
                         try {
                             const member = await interaction.guild.members.fetch(userId);
                             await member.roles.add(botConfig.discord_premium_role_id);
-                            return await interaction.reply({  content: '[ID] Role Premium berhasil diberikan! / [EN] Premium Role successfully granted!' , flags: 64 });
+                            return await interaction.reply({ content: '[ID] Role Premium berhasil diberikan! / [EN] Premium Role successfully granted!', flags: 64 });
                         } catch (err) {
-                            return await interaction.reply({  content: '[ID] Gagal memberikan role. / [EN] Failed to grant role.' , flags: 64 });
+                            return await interaction.reply({ content: '[ID] Gagal memberikan role. / [EN] Failed to grant role.', flags: 64 });
                         }
                     } else {
-                        return await interaction.reply({  content: '[ID] Premium Role ID belum di-setup. / [EN] Premium Role ID not setup.' , flags: 64 });
+                        return await interaction.reply({ content: '[ID] Premium Role ID belum di-setup. / [EN] Premium Role ID not setup.', flags: 64 });
                     }
                 }
 
@@ -960,7 +1064,7 @@ client.on('interactionCreate', async (interaction) => {
                     }
 
                     if (!canReset) {
-                        return await interaction.reply({  content: `[ID] Masih cooldown. Tunggu **${remainingHours} jam**. / [EN] Still on cooldown. Wait **${remainingHours} hours**.` , flags: 64 });
+                        return await interaction.reply({ content: `[ID] Masih cooldown. Tunggu **${remainingHours} jam**. / [EN] Still on cooldown. Wait **${remainingHours} hours**.`, flags: 64 });
                     }
 
                     const newCount = (activeKey.reset_count || 0) + 1;
@@ -970,8 +1074,8 @@ client.on('interactionCreate', async (interaction) => {
                         reset_count: newCount
                     }).eq('key_string', activeKey.key_string);
 
-                    if (resetError) return await interaction.reply({  content: `[ID] Gagal mereset: ${resetError.message} / [EN] Failed to reset: ${resetError.message}` , flags: 64 });
-                    return await interaction.reply({  content: '[ID] HWID berhasil di-reset! / [EN] HWID successfully reset!' , flags: 64 });
+                    if (resetError) return await interaction.reply({ content: `[ID] Gagal mereset: ${resetError.message} / [EN] Failed to reset: ${resetError.message}`, flags: 64 });
+                    return await interaction.reply({ content: '[ID] HWID berhasil di-reset! / [EN] HWID successfully reset!', flags: 64 });
                 }
 
                 if (interaction.customId === 'btn_get_stats') {
@@ -992,7 +1096,7 @@ client.on('interactionCreate', async (interaction) => {
                         .setThumbnail(interaction.user.displayAvatarURL())
                         .setColor(0x0099ff);
 
-                    return await interaction.reply({  embeds: [embed] , flags: 64 });
+                    return await interaction.reply({ embeds: [embed], flags: 64 });
                 }
             }
         }
@@ -1021,11 +1125,12 @@ client.on('interactionCreate', async (interaction) => {
         // Handle Modal Submission
         if (interaction.isModalSubmit()) {
 
-            if (interaction.customId === 'modal_claim_free_key') {
+            if (interaction.customId === 'modal_claim_free_key') {
+
                 const keyString = interaction.fields.getTextInputValue('claim_key_input').trim();
 
                 if (!keyString.startsWith('VONIXE-FREE-')) {
-                    return await interaction.reply({  content: '[ID] Format key salah! / [EN] Invalid key format!' , flags: 64 });
+                    return await interaction.reply({ content: '[ID] Format key salah! / [EN] Invalid key format!', flags: 64 });
                 }
 
                 const { data: pendingKey, error: lookupError } = await supabase
@@ -1036,7 +1141,7 @@ client.on('interactionCreate', async (interaction) => {
                     .single();
 
                 if (lookupError || !pendingKey) {
-                    return await interaction.reply({  content: '[ID] Key tidak valid atau sudah diklaim. / [EN] Key is invalid or already claimed.' , flags: 64 });
+                    return await interaction.reply({ content: '[ID] Key tidak valid atau sudah diklaim. / [EN] Key is invalid or already claimed.', flags: 64 });
                 }
 
                 const durationHours = pendingKey.duration_hours;
@@ -1053,9 +1158,9 @@ client.on('interactionCreate', async (interaction) => {
 
                 if (error) {
                     if (error.code === '23505') {
-                        return await interaction.reply({  content: '[ID] Key ini sudah diklaim! / [EN] This key has already been claimed!' , flags: 64 });
+                        return await interaction.reply({ content: '[ID] Key ini sudah diklaim! / [EN] This key has already been claimed!', flags: 64 });
                     }
-                    return await interaction.reply({  content: `[ID] Database Error: ${error.message} / [EN] Database Error: ${error.message}` , flags: 64 });
+                    return await interaction.reply({ content: `[ID] Database Error: ${error.message} / [EN] Database Error: ${error.message}`, flags: 64 });
                 }
 
                 await supabase
@@ -1073,10 +1178,11 @@ client.on('interactionCreate', async (interaction) => {
                     .setColor(0x00ff64)
                     .setTimestamp();
 
-                return await interaction.reply({  embeds: [embed] , flags: 64 });
+                return await interaction.reply({ embeds: [embed], flags: 64 });
             }
 
-            if (interaction.customId === 'modal_support_ticket') {
+            if (interaction.customId === 'modal_support_ticket') {
+
                 const scriptName = interaction.fields.getTextInputValue('ticket_script_name');
                 const summary = interaction.fields.getTextInputValue('ticket_issue_summary');
                 const desc = interaction.fields.getTextInputValue('ticket_issue_desc');
@@ -1091,7 +1197,8 @@ client.on('interactionCreate', async (interaction) => {
                 });
             }
 
-            if (interaction.customId === 'modal_redeem_premium') {                const inputCode = interaction.fields.getTextInputValue('license_code').trim();
+            if (interaction.customId === 'modal_redeem_premium') {
+                const inputCode = interaction.fields.getTextInputValue('license_code').trim();
 
                 const { data: license, error: licError } = await supabase
                     .from('hub_licenses')
@@ -1100,7 +1207,7 @@ client.on('interactionCreate', async (interaction) => {
                     .single();
 
                 if (licError || !license) {
-                    return await interaction.reply({  content: ' License Code tidak valid atau sudah digunakan.' , flags: 64 });
+                    return await interaction.reply({ content: '[ID] License Code tidak valid atau sudah digunakan. / [EN] License Code is invalid or already used.', flags: 64 });
                 }
 
                 const newKeyStr = 'VONIXE-PREM-' + generateRandomString(12);
@@ -1125,7 +1232,7 @@ client.on('interactionCreate', async (interaction) => {
                     discord_username: interaction.user.username
                 }]);
 
-                if (insertError) return await interaction.reply({  content: ` Error generating key: ${insertError.message}` , flags: 64 });
+                if (insertError) return await interaction.reply({ content: ` Error generating key: ${insertError.message}`, flags: 64 });
 
                 await supabase.from('hub_licenses').delete().eq('id', license.id);
 
@@ -1137,7 +1244,7 @@ client.on('interactionCreate', async (interaction) => {
                 }
 
                 const embed = new EmbedBuilder()
-                    .setTitle('✦ Redeem Sukses! ✦')
+                    .setTitle(' Redeem Sukses! ')
                     .setDescription(`License Code berhasil ditukar! Berikut adalah Premium Key Anda:`)
                     .addFields(
                         { name: ' Premium Key', value: `\`${newKeyStr}\`` },
@@ -1145,7 +1252,7 @@ client.on('interactionCreate', async (interaction) => {
                     )
                     .setColor(0x50dc78);
 
-                return await interaction.reply({  embeds: [embed] , flags: 64 });
+                return await interaction.reply({ embeds: [embed], flags: 64 });
             }
         }
     } catch (err) {
@@ -1153,7 +1260,7 @@ client.on('interactionCreate', async (interaction) => {
         const errMsg = String(err.message || err).substring(0, 1500);
         try {
             if (interaction.deferred || interaction.replied) {
-                await interaction.reply({  content: `[ID] Error: ${errMsg} / [EN] Error: ${errMsg}` , flags: 64 });
+                await interaction.reply({ content: `[ID] Error: ${errMsg} / [EN] Error: ${errMsg}`, flags: 64 });
             } else {
                 await interaction.reply({ content: `[ID] Error: ${errMsg} / [EN] Error: ${errMsg}`, flags: 64 });
             }
@@ -1180,7 +1287,7 @@ async function createTicketChannel(interaction, channelName, categoryId, typeTit
 
         const embed = new EmbedBuilder()
             .setTitle(` ${typeTitle}`)
-            .setDescription(`Halo <@${userId}>, Staff akan segera melayani anda.`)
+            .setDescription(`[ID] Halo <@${userId}>, Staff akan segera melayani anda.\n[EN] Hello <@${userId}>, Staff will assist you shortly.`)
             .setColor(0x00ff00)
             .setTimestamp();
 
@@ -1195,16 +1302,21 @@ async function createTicketChannel(interaction, channelName, categoryId, typeTit
         );
 
         await channel.send({
-            content: `<@${userId}> | <@&1393271773134323792> <@&1395410641698816152>`,
+            content: `<@${userId}>`,
             embeds: [embed],
             components: [row]
         });
 
-        await interaction.reply({  content: ` Ticket created: <#${channel.id}>` , flags: 64 });
+        await interaction.reply({ content: `[ID] Tiket dibuat: <#${channel.id}> / [EN] Ticket created: <#${channel.id}>`, flags: 64 });
+
+        // Auto-close after 24 hours
+        setTimeout(() => {
+            channel.delete().catch(() => { });
+        }, 24 * 60 * 60 * 1000);
 
     } catch (err) {
         console.error(' Ticket Error:', err);
-        await interaction.reply({  content: ` Gagal membuat tiket. Pastikan Bot punya izin Manage Channels.` , flags: 64 });
+        await interaction.reply({ content: `[ID] Gagal membuat tiket. Pastikan Bot punya izin Manage Channels. / [EN] Failed to create ticket. Ensure Bot has Manage Channels permission.`, flags: 64 });
     }
 }
 
@@ -1242,7 +1354,7 @@ async function checkAnnouncements() {
             }
 
             const embed = new EmbedBuilder()
-                .setTitle(`✦ ${announce.title} ✦`)
+                .setTitle(` ${announce.title} `)
                 .setDescription(processedDesc)
                 .setColor(0xffa000)
                 .setTimestamp()
@@ -1349,22 +1461,22 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
                 .from('active_premium_keys')
                 .select('*')
                 .eq('discord_id', newMember.id)
-                .eq('expires_at', 'BOOST');
-                
+                .eq('expires_at', '8888-08-08T08:08:08.000Z');
+
             if (!error && data && data.length > 0) {
-                await supabase.from('active_premium_keys').delete().eq('discord_id', newMember.id).eq('expires_at', 'BOOST');
+                await supabase.from('active_premium_keys').delete().eq('discord_id', newMember.id).eq('expires_at', '8888-08-08T08:08:08.000Z');
                 console.log(`[Boost Tracker] Deleted ${data.length} Boost Key(s) for ${newMember.user.tag}`);
-                
+
                 // Try to DM them
                 try {
                     const embed = new EmbedBuilder()
-                        .setTitle('😢 Boost Berakhir')
+                        .setTitle(' Boost Berakhir')
                         .setDescription('Masa aktif Server Boost kamu sudah berakhir, sehingga akses Premium Script otomatis dicabut.\n\nTerimakasih telah mem-boost server kami! Silakan boost kembali atau beli Premium jika ingin menggunakan script lagi.')
                         .setColor(0xff0000)
                         .setTimestamp();
                     await newMember.send({ embeds: [embed] });
-                } catch (dmErr) {}
-                
+                } catch (dmErr) { }
+
                 await sendAuditLog(newMember.client, '📉 Server Boost Ended', `**User:** <@${newMember.id}>\n**Action:** Premium Role and Boost Key automatically revoked.`, 0xff0000);
             }
         } catch (e) {
