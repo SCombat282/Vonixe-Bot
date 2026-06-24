@@ -2003,21 +2003,17 @@ async function gag2RunTrackerCycle() {
             } catch (e) { console.error('[GAG2 Gears] Full error:', e); }
         }
 
-        // ── Weather (special events only) ──
+        // ── Weather ──
         if (weather && weather !== gag2LastWeatherKey) {
             gag2LastWeatherKey = weather;
-            if (gag2IsSpecial(weather)) {
-                try {
-                    const chan = await client.channels.fetch(GAG2_CHANNELS.weather).catch(() => null);
-                    if (chan) {
-                        const embed = gag2BuildWeatherEmbed(data);
-                        await chan.send({ embeds: [embed] });
-                        console.log(`[GAG2 Weather] Special event posted: ${weather}`);
-                    }
-                } catch (e) { console.error('[GAG2 Weather] Full error:', e); }
-            } else {
-                console.log(`[GAG2 Weather] Regular weather changed to: ${weather} (not posted)`);
-            }
+            try {
+                const chan = await client.channels.fetch(GAG2_CHANNELS.weather).catch(() => null);
+                if (chan) {
+                    const embed = gag2BuildWeatherEmbed(data);
+                    await chan.send({ embeds: [embed] });
+                    console.log(`[GAG2 Weather] Posted weather change: ${weather}`);
+                }
+            } catch (e) { console.error('[GAG2 Weather] Full error:', e); }
         }
 
     } catch (err) {
