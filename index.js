@@ -1912,29 +1912,41 @@ function gag2BuildWeatherEmbed(data) {
     const currentEmoji = gag2WeatherEmoji(currentName);
     const isSpecial = gag2IsSpecial(currentName);
 
-    let desc = '';
+    let desc = [
+        '🌙 **CURRENT WEATHER**',
+        '=============================='
+    ];
+
     if (current) {
         const endsAt = current.endsAt ?? current.endTime ?? null;
-        desc += `**Now Active:** ${currentEmoji} **${currentName}**`;
-        if (endsAt) desc += `  —  ends ${gag2Countdown(endsAt)}`;
-        desc += '\n\n';
+        let line = `${currentEmoji} **${currentName}**`;
+        if (endsAt) line += `  —  ends ${gag2Countdown(endsAt)}`;
+        desc.push(line, '');
+    } else {
+        desc.push('> _No data available._', '');
     }
 
+    desc.push(
+        '🔮 **UPCOMING NIGHTS & MOONS**',
+        '=============================='
+    );
+
     if (upcoming.length > 0) {
-        desc += '**Upcoming Nights & Moons:**\n';
         for (const w of upcoming) {
             const em = gag2WeatherEmoji(w.name);
             const special = gag2IsSpecial(w.name);
             const label = special ? `**${w.name}** 🚨` : w.name;
-            desc += `${em} ${label}`;
-            if (w.startsAt) desc += `  —  ${gag2Countdown(w.startsAt)}`;
-            desc += '\n';
+            let line = `${em} ${label}`;
+            if (w.startsAt) line += `  —  ${gag2Countdown(w.startsAt)}`;
+            desc.push(line);
         }
+    } else {
+        desc.push('> _No data available._');
     }
 
     return new EmbedBuilder()
-        .setTitle(`🌙 GAG2 Weather — ${currentEmoji} ${currentName}`)
-        .setDescription(desc || '_No weather data available._')
+        .setAuthor({ name: '🌤️ GAG2 — Weather Tracker' })
+        .setDescription(desc.join('\n'))
         .setColor(isSpecial ? 0x9C27B0 : 0x37474F)
         .setFooter({ text: 'Vonixe Hub • GAG2 Weather Tracker' })
         .setTimestamp();
