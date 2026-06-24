@@ -1,4 +1,5 @@
 process.on('unhandledRejection', error => console.error('Unhandled Promise Rejection:', error));
+require('dns').setDefaultResultOrder('ipv4first');
 require('dotenv').config();
 const {
     Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits,
@@ -8,7 +9,7 @@ const {
 const { joinVoiceChannel, getVoiceConnection } = require('@discordjs/voice');
 const { createClient } = require('@supabase/supabase-js');
 console.log(' Token exists:', !!process.env.DISCORD_TOKEN);
-console.log('� Supabase URL exists:', !!process.env.SUPABASE_URL);
+console.log('  Supabase URL exists:', !!process.env.SUPABASE_URL);
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
@@ -32,6 +33,41 @@ app.use((req, res, next) => {
     next();
 });
 
+// --- LIVE SESSIONS TRACKER ---
+const liveSessions = {}; // { userId: { username, scriptName, placeId, jobId, lastSeen } }
+
+// Cleanup interval (Runs every 2 minutes, removes users inactive for > 2 mins)
+setInterval(() => {
+    const now = Date.now();
+    for (const userId in liveSessions) {
+        if (now - liveSessions[userId].lastSeen > 120000) {
+            delete liveSessions[userId];
+        }
+    }
+}, 120000);
+
+app.post('/api/live/heartbeat', (req, res) => {
+    const { userId, username, scriptName, placeId, jobId } = req.body;
+    if (userId) {
+        liveSessions[userId] = {
+            username: username || "Unknown",
+            scriptName: scriptName || "Unknown Script",
+            placeId: placeId || 0,
+            jobId: jobId || "",
+            lastSeen: Date.now()
+        };
+    }
+    res.sendStatus(200);
+});
+
+app.get('/api/admin/live', (req, res) => {
+    const sessions = Object.values(liveSessions);
+    res.json({
+        total: sessions.length,
+        users: sessions
+    });
+});
+
 app.get('/api/admin/channels', (req, res) => {
     try {
         let guilds = [];
@@ -51,10 +87,23 @@ app.get('/api/admin/channels', (req, res) => {
 
 app.post('/api/admin/announce', async (req, res) => {
     try {
-        const { channelId, embed } = req.body;
+        const { channelId, embed, content, components } = req.body;
         const channel = await client.channels.fetch(channelId);
         if (!channel) return res.status(404).json({ error: 'Channel not found' });
-        await channel.send({ embeds: [embed] });
+
+        let messageOptions = { embeds: [embed] };
+        if (content) messageOptions.content = content;
+
+        if (components) {
+            try {
+                if (components[0] && components[0].components && components[0].components[0] && vonixeEmoji) {
+                    components[0].components[0].emoji = { id: vonixeEmoji.id, name: vonixeEmoji.name };
+                }
+            } catch (err) { }
+            messageOptions.components = components;
+        }
+
+        await channel.send(messageOptions);
         res.json({ success: true });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -247,6 +296,83 @@ client.once('ready', async () => {
 
     console.log(` Logged in as ${client.user.tag}!`);
     await loadBotConfig();
+
+    // ✅ [GAG2] Start stock tracker after config is loaded
+    startGAG2StockTracker();
+
+    // --- LIVE PET TRACKER (Vonixe Hub Notification) ---
+    const PET_CHANNEL_ID = '1519002671359459438';
+    let lastPetCheck = new Date().toISOString();
+
+    setInterval(async () => {
+        try {
+            const { data, error } = await supabase
+                .from('pet_servers')
+                .select('*')
+                .gt('created_at', lastPetCheck)
+                .order('created_at', { ascending: true });
+
+            if (error) {
+                console.error('[PetTracker] Fetch error:', error.message);
+                return;
+            }
+
+            if (data && data.length > 0) {
+                lastPetCheck = data[data.length - 1].created_at;
+                const channel = await client.channels.fetch(PET_CHANNEL_ID).catch(() => null);
+                if (!channel) return;
+
+                for (const pet of data) {
+                    const colorMap = {
+                        'mythic': 16007990,     // Rose
+                        'legendary': 16492312,  // Yellow
+                        'super': 16711935,      // Magenta (Super)
+                        'rare': 3901174,        // Blue
+                        'uncommon': 1211977     // Emerald
+                    };
+
+                    const types = (pet.pet_type || '').split(/\s*,\s*/).filter(Boolean);
+                    const rarities = (pet.rarity || '').split(/\s*,\s*/).filter(Boolean);
+                    const prices = (pet.price || '').split(/\s*,\s*/).filter(Boolean);
+
+                    for (let i = 0; i < types.length; i++) {
+                        const singleType = types[i];
+                        const singleRarity = rarities[i] || 'Common';
+                        const singlePrice = prices[i] || 'Free';
+
+                        let color = 10066329; // default gray
+                        const r = singleRarity.toLowerCase();
+                        if (r.includes('mythic')) color = colorMap['mythic'];
+                        else if (r.includes('legendary')) color = colorMap['legendary'];
+                        else if (r.includes('super')) color = colorMap['super'];
+                        else if (r.includes('rare')) color = colorMap['rare'];
+                        else if (r.includes('uncommon')) color = colorMap['uncommon'];
+
+                        const PLACE_ID = '97598239454123';
+                        const embed = new EmbedBuilder()
+                            .setTitle('Vonixe Hub Pet Finder')
+                            .addFields(
+                                { name: 'Pet Name:', value: `\`\`\`${singleType}\`\`\``, inline: false },
+                                { name: 'Players:', value: `\`\`\`${pet.people || '1/8'}\`\`\``, inline: false },
+                                { name: 'PlaceId:', value: `\`\`\`${PLACE_ID}\`\`\``, inline: false },
+                                { name: 'Jobid:', value: `\`\`\`${pet.job_id}\`\`\``, inline: false },
+                                { name: 'Jobid (Mobile):', value: `${pet.job_id}`, inline: false }
+                            )
+                            .setColor(color)
+                            .setFooter({ text: 'Vonixe Hub • Live Pet Tracker', iconURL: client.user?.displayAvatarURL() })
+                            .setTimestamp();
+
+                        await channel.send({ embeds: [embed] });
+                        await new Promise(res => setTimeout(res, 1000)); // anti-rate limit
+                    }
+                    await new Promise(res => setTimeout(res, 1000)); // anti-rate limit
+                }
+            }
+        } catch (e) {
+            console.error('[PetTracker] Check loop error:', e.message);
+        }
+    }, 5000); // Check setiap 5 detik
+    // --------------------------------------------------
 
     const commandsArray = [
         new SlashCommandBuilder()
@@ -616,7 +742,7 @@ client.on('interactionCreate', async (interaction) => {
                     .setTitle(' License Code Berhasil Dibuat ')
                     .setDescription(`License Code untuk <@${targetUser ? targetUser.id : 'Unknown'}> telah dibuat.\nSilakan tukar kode ini menjadi Key di Premium Panel.`)
                     .addFields(
-                        { name: '� User', value: `${targetUser ? targetUser.user.username : 'Unknown'} (${targetUser ? targetUser.id : 'Unknown'})` },
+                        { name: '  User', value: `${targetUser ? targetUser.user.username : 'Unknown'} (${targetUser ? targetUser.id : 'Unknown'})` },
                         { name: ' License Code', value: `\`${licenseCode}\`` },
                         { name: ' Durasi', value: cleanDurationStr }
                     )
@@ -904,7 +1030,7 @@ client.on('interactionCreate', async (interaction) => {
                 const freeLink = (botConfig.free_key_link || 'https://vonixehub.my.id/getkey').replace('#getkey', 'getkey');
                 const embed = new EmbedBuilder()
                     .setTitle(' Get Free Key ')
-                    .setDescription(`**[ID]** Silakan selesaikan checkpoint melalui link berikut untuk mendapatkan key gratis 24 jam:\n\n**[EN]** Please complete the checkpoint through the link below to get your free 24-hour key:\n\n� **[Click Here to Get Free Key](${freeLink})**`)
+                    .setDescription(`**[ID]** Silakan selesaikan checkpoint melalui link berikut untuk mendapatkan key gratis 24 jam:\n\n**[EN]** Please complete the checkpoint through the link below to get your free 24-hour key:\n\n  **[Click Here to Get Free Key](${freeLink})**`)
                     .setColor(0x0099ff);
                 return await interaction.reply({ embeds: [embed], flags: 64 });
             }
@@ -1367,7 +1493,7 @@ async function checkAnnouncements() {
                     .setLabel('Vonixe Hub Website')
                     .setURL('https://vonixehub.my.id')
                     .setStyle(ButtonStyle.Link)
-                    .setEmoji(vonixeEmoji ? vonixeEmoji.id : '�')
+                    .setEmoji(vonixeEmoji ? vonixeEmoji.id : ' ')
             );
 
             await channel.send({
@@ -1377,7 +1503,7 @@ async function checkAnnouncements() {
             });
 
             await supabase.from('bot_announcements').update({ status: 'sent' }).eq('id', announce.id);
-            console.log(`� Announcement sent: ${announce.title}`);
+            console.log(`  Announcement sent: ${announce.title}`);
 
         } catch (err) {
             console.error(` Announcement Error:`, err.message);
@@ -1394,12 +1520,12 @@ client.on('ready', async () => {
         const guild = client.guilds.cache.first();
 
         if (guild) {
-            console.log(`� Checking emoji in guild: ${guild.name}`);
+            console.log(`  Checking emoji in guild: ${guild.name}`);
             await guild.emojis.fetch();
             vonixeEmoji = guild.emojis.cache.find(e => e.name === 'vonixe_logo');
 
             if (!vonixeEmoji) {
-                console.log('� Fetching logo buffer to upload (with Headers)...');
+                console.log('  Fetching logo buffer to upload (with Headers)...');
                 const https = require('https');
 
                 const fetchImage = (url) => {
@@ -1425,7 +1551,7 @@ client.on('ready', async () => {
 
                 try {
                     const buffer = await fetchImage('https://media.discordapp.net/attachments/771388554093527085/1487203240851411044/vonixe_hub_logo-removebg-preview.png?ex=69c84973&is=69c6f7f3&hm=5bf8c4f6db13978e17a6d288196540f39e484b5aeb95a4ed482a597efced9d79&=&format=webp&quality=lossless&width=500&height=500');
-                    console.log(`� Logo buffer received (Size: ${buffer.length} bytes)`);
+                    console.log(`  Logo buffer received (Size: ${buffer.length} bytes)`);
                     const dataUri = `data:image/png;base64,${buffer.toString('base64')}`;
                     vonixeEmoji = await guild.emojis.create({ attachment: dataUri, name: 'vonixe_logo' });
                     console.log(' Created branded emoji: vonixe_logo');
@@ -1443,7 +1569,7 @@ client.on('ready', async () => {
     setInterval(checkAnnouncements, 30000);
 });
 
-console.log('� Connecting to Discord...');
+console.log('  Connecting to Discord...');
 // 4. Boost Tracker Listener
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
     // Check if user stopped boosting
@@ -1485,9 +1611,433 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     }
 });
 
+// ============================================================
+//  GAG2 STOCK TRACKER
+// ============================================================
+
+// ── Channel IDs ─────────────────────────────────────────────
+const GAG2_CHANNELS = {
+    seeds: '1519203037871341588',
+    gears: '1519209655543402527',
+    // crates: '1519211830382428241',  // ❌ Not in API — skipped
+    weather: '1519212067385507892',
+};
+
+const GAG2_API_URL = 'https://www.game.guide/api/gag2-stock';
+
+// ── Rarity table ─────────────────────────────────────────────
+const RARITY_CFG = {
+    'Common': { emoji: '⚪', color: 0x9E9E9E, priority: 0 },
+    'Uncommon': { emoji: '🟢', color: 0x4CAF50, priority: 1 },
+    'Rare': { emoji: '🔵', color: 0x2196F3, priority: 2 },
+    'Epic': { emoji: '🟣', color: 0x9C27B0, priority: 3 },
+    'Legendary': { emoji: '🟡', color: 0xFFD700, priority: 4 },
+    'Mythic': { emoji: '🔴', color: 0xF44336, priority: 5 },
+    'Super': { emoji: '🌟', color: 0xFF9800, priority: 6 },
+};
+
+// ── Weather config ────────────────────────────────────────────
+const SPECIAL_WEATHER_KEYWORDS = [
+    'blood moon', 'gold moon', 'golden moon',
+    'rainbow moon', 'thunderstorm', 'starfall', 'rainbow',
+];
+
+const WEATHER_EMOJI = {
+    'blood moon': '🩸',
+    'gold moon': '🌕',
+    'golden moon': '🌕',
+    'rainbow moon': '🌈',
+    'thunderstorm': '⚡',
+    'starfall': '🌠',
+    'rainbow': '🌈',
+    'rain': '🌧️',
+    'sunny': '☀️',
+    'windy': '💨',
+    'snow': '❄️',
+    'snowfall': '❄️',
+    'night': '🌙',
+    'day': '🌤️',
+};
+
+// ── De-dup state ──────────────────────────────────────────────
+let gag2LastSeedKey = null;
+let gag2LastGearKey = null;
+let gag2LastWeatherKey = null;
+
+// ── Helpers ───────────────────────────────────────────────────
+function gag2RarityCfg(rarity) {
+    if (!rarity) return RARITY_CFG['Common'];
+    const key = Object.keys(RARITY_CFG)
+        .find(k => k.toLowerCase() === rarity.toLowerCase());
+    return RARITY_CFG[key] || RARITY_CFG['Common'];
+}
+
+function gag2StockKey(items) {
+    if (!items || items.length === 0) return '__empty__';
+    return items
+        .map(i => `${(i.name || '').toLowerCase()}:${i.qty ?? i.quantity ?? 0}`)
+        .sort()
+        .join('|');
+}
+
+function gag2FindCurrentRestock(restocks, now) {
+    if (!restocks || restocks.length === 0) return { current: null, next: null };
+    let current = null;
+    let next = null;
+    for (let i = 0; i < restocks.length; i++) {
+        if (restocks[i].time <= now) {
+            current = restocks[i];
+            next = restocks[i + 1] || null;
+        } else {
+            if (!current) { current = restocks[i]; next = restocks[i + 1] || null; }
+            else if (!next) { next = restocks[i]; }
+            break;
+        }
+    }
+    return { current, next };
+}
+
+function gag2TopPriority(items) {
+    return (items || []).reduce((best, item) => {
+        const p = gag2RarityCfg(item.rarity).priority;
+        return p > best ? p : best;
+    }, -1);
+}
+
+function gag2ItemLines(client, items) {
+    if (!items || items.length === 0) return '_No items available._';
+    const sorted = [...items].sort((a, b) =>
+        gag2RarityCfg(a.rarity).priority - gag2RarityCfg(b.rarity).priority
+    );
+    return sorted.map(item => {
+        const cfg = gag2RarityCfg(item.rarity);
+        const icon = gag2GetItemEmoji(client, item.name, cfg);
+        const qty = item.qty != null ? `\`x${item.qty}\`` : '';
+        const price = item.price != null ? ` — 🌿 ${Number(item.price).toLocaleString()}¢` : '';
+        const rare = item.rarity || 'Common';
+        return `${icon} **${item.name}** ${qty}${price} \`${rare}\``;
+    }).join('\n');
+}
+
+function gag2GetItemEmoji(client, itemName, rarityCfg) {
+    if (!itemName) return rarityCfg.emoji;
+
+    // Search custom emojis first
+    if (client && client.emojis && client.emojis.cache) {
+        const target = itemName.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const customEmoji = client.emojis.cache.find(e => {
+            const emojiName = e.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+            return emojiName === target ||
+                emojiName === `gag2${target}` ||
+                emojiName === `growagarden2${target}`;
+        });
+        if (customEmoji) return customEmoji.toString();
+    }
+
+    // Fallback to unicode
+    const lower = itemName.toLowerCase();
+    if (typeof ITEM_EMOJIS !== 'undefined' && ITEM_EMOJIS[lower]) return ITEM_EMOJIS[lower];
+    if (lower.includes('sprinkler')) return '⛲';
+    if (lower.includes('watering can')) return '🚿';
+
+    return rarityCfg.emoji; // fallback to rarity circle
+}
+
+function gag2Countdown(ts) {
+    if (!ts) return 'Unknown';
+    return `<t:${ts}:R>`;
+}
+
+function gag2WeatherEmoji(name) {
+    if (!name) return '🌤️';
+    const key = Object.keys(WEATHER_EMOJI)
+        .find(k => name.toLowerCase().includes(k));
+    return key ? WEATHER_EMOJI[key] : '🌤️';
+}
+
+function gag2IsSpecial(weatherName) {
+    if (!weatherName) return false;
+    const lower = weatherName.toLowerCase();
+    return SPECIAL_WEATHER_KEYWORDS.some(kw => lower.includes(kw));
+}
+
+// ── Embed builders ────────────────────────────────────────────
+function gag2BuildSeedEmbed(client, data) {
+    const now = Math.floor(Date.now() / 1000);
+    const allRestocks = data?.upcoming?.seeds ?? [];
+    const { current, next } = gag2FindCurrentRestock(allRestocks, now);
+    const seeds = current?.items ?? [];
+    const nextTime = next?.time ?? null;
+    const topP = gag2TopPriority(seeds);
+
+    let color = 0x4CAF50;
+    if (topP >= 7) color = 0xE8EAF6;
+    else if (topP >= 6) color = 0xFF9800;
+    else if (topP >= 4) color = 0xFFD700;
+    else if (topP >= 3) color = 0x9C27B0;
+    else if (topP >= 2) color = 0x2196F3;
+
+    let nextPrediction = '> _No data available._';
+    if (next && next.items) {
+        nextPrediction = gag2ItemLines(client, next.items);
+    }
+
+    const timerText = nextTime ? `( ${gag2Countdown(nextTime)} )` : '';
+    const desc = [
+        '🛒 **CURRENTLY IN STOCK**',
+        '==============================',
+        gag2ItemLines(client, seeds) || '> _Empty_',
+        '',
+        `🔮 **UPCOMING PREDICTION** ${timerText}`,
+        '==============================',
+        nextPrediction
+    ].join('\n');
+
+    return new EmbedBuilder()
+        .setAuthor({ name: '🌱 GAG2 — Seed Shop Restock' })
+        .setDescription(desc)
+        .setColor(color)
+        .setFooter({ text: `Vonixe Hub • Total Items: ${seeds.length}` })
+        .setTimestamp();
+}
+
+function gag2BuildGearEmbed(client, data) {
+    const now = Math.floor(Date.now() / 1000);
+    const allRestocks = data?.upcoming?.gears ?? [];
+    const { current, next } = gag2FindCurrentRestock(allRestocks, now);
+    const gears = current?.items ?? [];
+    const nextTime = next?.time ?? null;
+    const topP = gag2TopPriority(gears);
+
+    let color = 0x2196F3;
+    if (topP >= 6) color = 0xFF9800;
+    else if (topP >= 4) color = 0xFFD700;
+    else if (topP >= 3) color = 0x9C27B0;
+
+    let nextPrediction = '> _No data available._';
+    if (next && next.items) {
+        nextPrediction = gag2ItemLines(client, next.items);
+    }
+
+    const timerText = nextTime ? `( ${gag2Countdown(nextTime)} )` : '';
+    const desc = [
+        '🛒 **CURRENTLY IN STOCK**',
+        '==============================',
+        gag2ItemLines(client, gears) || '> _Empty_',
+        '',
+        `🔮 **UPCOMING PREDICTION** ${timerText}`,
+        '==============================',
+        nextPrediction
+    ].join('\n');
+
+    return new EmbedBuilder()
+        .setAuthor({ name: '⚙️ GAG2 — Gear Shop Restock' })
+        .setDescription(desc)
+        .setColor(color)
+        .setFooter({ text: `Vonixe Hub • Total Items: ${gears.length}` })
+        .setTimestamp();
+}
+
+function gag2GetWeatherSchedule(weatherData, now) {
+    if (!weatherData || !weatherData.seq) return { current: null, upcoming: [] };
+
+    const clen = weatherData.clen || 600;
+    const weekSeconds = 7 * 24 * 60 * 60;
+    const currentSecondOfWeek = now % weekSeconds;
+    const cycleIndex = Math.floor(currentSecondOfWeek / clen);
+    const timeInCycle = now % clen;
+    const cycleStart = now - timeInCycle;
+
+    const phases = weatherData.phases || [
+        { offset: 0, duration: 450 },
+        { offset: 450, duration: 30 },
+        { offset: 480, duration: 120 }
+    ];
+
+    let currentPhaseIdx = 0;
+    for (let i = phases.length - 1; i >= 0; i--) {
+        if (timeInCycle >= phases[i].offset) {
+            currentPhaseIdx = i;
+            break;
+        }
+    }
+
+    let cIdx = cycleIndex;
+    let pIdx = currentPhaseIdx;
+
+    // Game Guide has a +634 offset from standard weekly epoch
+    const seqLength = weatherData.seq.length;
+    const seqIdx = (cIdx + 634) % seqLength;
+    const currentName = weatherData.seq[seqIdx][pIdx];
+    const currentStartsAt = cycleStart + phases[pIdx].offset;
+    const currentEndsAt = currentStartsAt + phases[pIdx].duration;
+
+    const schedule = [{ name: currentName, startsAt: currentStartsAt, endsAt: currentEndsAt }];
+
+    // Find next 5 Night phases
+    const upcomingNights = [];
+    let searchCIdx = cIdx;
+    let searchPIdx = pIdx + 1;
+    if (searchPIdx >= phases.length) {
+        searchPIdx = 0;
+        searchCIdx++;
+    }
+
+    while (upcomingNights.length < 5) {
+        if (searchPIdx === 2) { // 2 is the Night phase
+            const searchSeqIdx = (searchCIdx + 634) % seqLength;
+            const name = weatherData.seq[searchSeqIdx][searchPIdx];
+            const pInfo = phases[searchPIdx];
+            const startsAt = cycleStart + (searchCIdx - cycleIndex) * clen + pInfo.offset;
+            upcomingNights.push({ name, startsAt, endsAt: startsAt + pInfo.duration });
+        }
+        searchPIdx++;
+        if (searchPIdx >= phases.length) {
+            searchPIdx = 0;
+            searchCIdx++;
+        }
+    }
+
+    return {
+        current: schedule[0],
+        upcoming: upcomingNights
+    };
+}
+
+function gag2BuildWeatherEmbed(data) {
+    const now = Math.floor(Date.now() / 1000);
+    const { current, upcoming } = gag2GetWeatherSchedule(data?.weather, now);
+
+    const currentName = current?.name ?? 'Unknown';
+    const currentEmoji = gag2WeatherEmoji(currentName);
+    const isSpecial = gag2IsSpecial(currentName);
+
+    let desc = '';
+    if (current) {
+        const endsAt = current.endsAt ?? current.endTime ?? null;
+        desc += `**Now Active:** ${currentEmoji} **${currentName}**`;
+        if (endsAt) desc += `  —  ends ${gag2Countdown(endsAt)}`;
+        desc += '\n\n';
+    }
+
+    if (upcoming.length > 0) {
+        desc += '**Upcoming Nights & Moons:**\n';
+        for (const w of upcoming) {
+            const em = gag2WeatherEmoji(w.name);
+            const special = gag2IsSpecial(w.name);
+            const label = special ? `**${w.name}** 🚨` : w.name;
+            desc += `${em} ${label}`;
+            if (w.startsAt) desc += `  —  ${gag2Countdown(w.startsAt)}`;
+            desc += '\n';
+        }
+    }
+
+    return new EmbedBuilder()
+        .setTitle(`🌙 GAG2 Weather — ${currentEmoji} ${currentName}`)
+        .setDescription(desc || '_No weather data available._')
+        .setColor(isSpecial ? 0x9C27B0 : 0x37474F)
+        .setFooter({ text: 'Vonixe Hub • GAG2 Weather Tracker' })
+        .setTimestamp();
+}
+
+// ── Core fetch + dispatch ─────────────────────────────────────
+async function fetchGAG2Stock() {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 9000);
+    try {
+        const res = await fetch(`${GAG2_API_URL}?_=${Date.now()}`, {
+            headers: {
+                'User-Agent': 'VonixeBot/1.0 (Discord Stock Tracker)',
+                'Accept': 'application/json',
+            },
+            signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (!res.ok) throw new Error(`HTTP ${res.status} from gag2-stock API`);
+        return await res.json();
+    } catch (err) {
+        clearTimeout(timeout);
+        throw err;
+    }
+}
+
+async function gag2RunTrackerCycle() {
+    try {
+        const data = await fetchGAG2Stock();
+
+        const now = Math.floor(Date.now() / 1000);
+        const allSeeds = data?.upcoming?.seeds ?? [];
+        const allGears = data?.upcoming?.gears ?? [];
+        const { current: curSeed } = gag2FindCurrentRestock(allSeeds, now);
+        const { current: curGear } = gag2FindCurrentRestock(allGears, now);
+        const seeds = curSeed?.items ?? [];
+        const gears = curGear?.items ?? [];
+        const seq = data?.weather?.seq ?? [];
+        const weather = Array.isArray(seq[0]) ? seq[0][2] : (seq[0]?.name ?? null);
+
+        // ── Seeds ──
+        const newSeedKey = gag2StockKey(seeds);
+        if (newSeedKey !== gag2LastSeedKey) {
+            gag2LastSeedKey = newSeedKey;
+            try {
+                const chan = await client.channels.fetch(GAG2_CHANNELS.seeds).catch(() => null);
+                if (chan) {
+                    const embed = gag2BuildSeedEmbed(client, data);
+                    await chan.send({ embeds: [embed] });
+                    console.log(`[GAG2 Seeds] Posted restock.`);
+                }
+            } catch (e) { console.error('[GAG2 Seeds] Full error:', e); }
+        }
+
+        // ── Gears ──
+        const newGearKey = gag2StockKey(gears);
+        if (newGearKey !== gag2LastGearKey) {
+            gag2LastGearKey = newGearKey;
+            try {
+                const chan = await client.channels.fetch(GAG2_CHANNELS.gears).catch(() => null);
+                if (chan) {
+                    const embed = gag2BuildGearEmbed(client, data);
+                    await chan.send({ embeds: [embed] });
+                    console.log(`[GAG2 Gears] Posted restock.`);
+                }
+            } catch (e) { console.error('[GAG2 Gears] Full error:', e); }
+        }
+
+        // ── Weather (special events only) ──
+        if (weather && weather !== gag2LastWeatherKey) {
+            gag2LastWeatherKey = weather;
+            if (gag2IsSpecial(weather)) {
+                try {
+                    const chan = await client.channels.fetch(GAG2_CHANNELS.weather).catch(() => null);
+                    if (chan) {
+                        const embed = gag2BuildWeatherEmbed(data);
+                        await chan.send({ embeds: [embed] });
+                        console.log(`[GAG2 Weather] Special event posted: ${weather}`);
+                    }
+                } catch (e) { console.error('[GAG2 Weather] Full error:', e); }
+            } else {
+                console.log(`[GAG2 Weather] Regular weather changed to: ${weather} (not posted)`);
+            }
+        }
+
+    } catch (err) {
+        console.error('[GAG2 Tracker] Cycle error:', err.message);
+    }
+}
+
+function startGAG2StockTracker() {
+    console.log('[GAG2 Tracker] Stock tracker starting (30-sec interval)...');
+    gag2RunTrackerCycle();                             // Fire immediately on bot ready
+    setInterval(gag2RunTrackerCycle, 30 * 1000);     // Then every 30 seconds
+}
+
+// ============================================================
+//  END OF GAG2 STOCK TRACKER
+// ============================================================
+
 const loginTimeout = setTimeout(() => {
-    console.error(' Login timeout: Bot took too long to connect.');
-}, 15000);
+    console.error(' Login timeout: Bot took too long to connect (lebih dari 60 detik). Coba cek koneksi internet kamu.');
+}, 60000);
 
 client.login(token).then(() => {
     clearTimeout(loginTimeout);
