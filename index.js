@@ -1972,8 +1972,8 @@ async function gag2RunTrackerCycle() {
         const { current: curGear } = gag2FindCurrentRestock(allGears, now);
         const seeds = curSeed?.items ?? [];
         const gears = curGear?.items ?? [];
-        const seq = data?.weather?.seq ?? [];
-        const weather = Array.isArray(seq[0]) ? seq[0][2] : (seq[0]?.name ?? null);
+        const { current: curWeatherSchedule } = gag2GetWeatherSchedule(data?.weather, now);
+        const weather = curWeatherSchedule?.name ?? null;
 
         // ── Seeds ──
         const newSeedKey = gag2StockKey(seeds);
