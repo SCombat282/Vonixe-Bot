@@ -4,6 +4,7 @@ require('dotenv').config();
 const {
     Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits,
     ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
+    ContainerBuilder, SectionBuilder, TextDisplayBuilder, ThumbnailBuilder,
     REST, Routes, SlashCommandBuilder
 } = require('discord.js');
 const { joinVoiceChannel, getVoiceConnection } = require('@discordjs/voice');
@@ -16,6 +17,70 @@ const SUPABASE_KEY = process.env.SUPABASE_KEY;
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const express = require('express');
+const fs = require('fs');
+
+let gamesConfig = {
+    messageId: null,
+    channelId: null,
+    games: [
+        { name: 'Grow a Garden 2', status: 'Operational' },
+        { name: 'Violence District', status: 'Operational' }
+    ]
+};
+
+function loadGamesConfig() {
+    try {
+        if (fs.existsSync('games_config.json')) {
+            const data = fs.readFileSync('games_config.json', 'utf8');
+            gamesConfig = JSON.parse(data);
+        } else {
+            saveGamesConfig();
+        }
+    } catch (e) {
+        console.error('Error loading games config:', e);
+    }
+}
+
+function saveGamesConfig() {
+    fs.writeFileSync('games_config.json', JSON.stringify(gamesConfig, null, 2));
+}
+loadGamesConfig();
+
+let giveaways = {};
+
+function loadGiveaways() {
+    try {
+        if (fs.existsSync('giveaways.json')) {
+            giveaways = JSON.parse(fs.readFileSync('giveaways.json', 'utf8'));
+        } else {
+            saveGiveaways();
+        }
+    } catch (e) {
+        console.error('Error loading giveaways:', e);
+    }
+}
+
+function saveGiveaways() {
+    fs.writeFileSync('giveaways.json', JSON.stringify(giveaways, null, 2));
+}
+loadGiveaways();
+
+function buildGamesPanelContent() {
+    let content = '# Supported Games\n\n';
+    if (gamesConfig.games.length === 0) {
+        content += '*No games supported yet.*\n\n';
+    } else {
+        for (const game of gamesConfig.games) {
+            let icon = '🟢';
+            if (game.status === 'Degraded') icon = '🟡';
+            if (game.status === 'Deprecated') icon = '🔴';
+            content += `- ${game.name} [ ${icon} ]\n`;
+        }
+        content += '\n';
+    }
+    content += '🟢 Operational — fully working\n🟡 Degraded — works, but buggy\n🔴 Deprecated — outdated / unmaintained';
+    return content;
+}
 
 // --- SERVER PIN (For Render Keep-alive) ---
 const app = express();
@@ -45,6 +110,71 @@ setInterval(() => {
         }
     }
 }, 120000);
+
+// GIVEAWAY CHECKER
+setInterval(async () => {
+    const now = Date.now();
+    for (const [msgId, gw] of Object.entries(giveaways)) {
+        if (!gw.ended && now >= gw.endTime) {
+            gw.ended = true;
+            saveGiveaways();
+
+            try {
+                const channel = await client.channels.fetch(gw.channelId);
+                const message = await channel.messages.fetch(msgId);
+
+                const payload = {
+                    flags: 32768,
+                    components: [
+                        {
+                            type: 17,
+                            components: [
+                                {
+                                    type: 9,
+                                    components: [{
+                                        type: 10,
+                                        content: `# 🎉 GIVEAWAY ENDED 🎉\nPrize: **${gw.prize}**\nWinners: **${gw.winnersCount}**\nEnded: <t:${Math.floor(now / 1000)}:R>\n\nThis giveaway has concluded!`
+                                    }],
+                                    accessory: { type: 11, media: { url: 'https://i.imgur.com/buvIdbn.gif' } }
+                                }
+                            ]
+                        },
+                        {
+                            type: 17,
+                            components: [
+                                {
+                                    type: 1,
+                                    components: [
+                                        { type: 2, custom_id: 'join_giveaway_ended', label: 'Ended', style: 2, disabled: true }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                };
+
+                await client.rest.patch(Routes.channelMessage(gw.channelId, msgId), { body: payload });
+
+                if (gw.participants.length === 0) {
+                    await channel.send(`The giveaway for **${gw.prize}** has ended, but nobody joined!`);
+                    continue;
+                }
+
+                let winners = [];
+                let p = [...gw.participants];
+                for (let i = 0; i < Math.min(gw.winnersCount, gw.participants.length); i++) {
+                    const idx = Math.floor(Math.random() * p.length);
+                    winners.push(`<@${p[idx]}>`);
+                    p.splice(idx, 1);
+                }
+
+                await channel.send(`🎉 Congratulations ${winners.join(', ')}! You won **${gw.prize}**!`);
+            } catch (e) {
+                console.error('Error ending giveaway:', e);
+            }
+        }
+    }
+}, 15000);
 
 app.post('/api/live/heartbeat', (req, res) => {
     const { userId, username, scriptName, placeId, jobId } = req.body;
@@ -87,23 +217,32 @@ app.get('/api/admin/channels', (req, res) => {
 
 app.post('/api/admin/announce', async (req, res) => {
     try {
-        const { channelId, embed, content, components } = req.body;
+        const { channelId, embed, embeds, content, components, flags } = req.body;
         const channel = await client.channels.fetch(channelId);
         if (!channel) return res.status(404).json({ error: 'Channel not found' });
 
-        let messageOptions = { embeds: [embed] };
+        let messageOptions = {};
+        if (embeds && Array.isArray(embeds)) {
+            messageOptions.embeds = embeds;
+        } else if (embed) {
+            messageOptions.embeds = [embed];
+        }
+
         if (content) messageOptions.content = content;
+        if (flags) messageOptions.flags = flags;
 
         if (components) {
             try {
-                if (components[0] && components[0].components && components[0].components[0] && vonixeEmoji) {
-                    components[0].components[0].emoji = { id: vonixeEmoji.id, name: vonixeEmoji.name };
+                const actionRow = components.find(c => c.type === 1);
+                if (actionRow && actionRow.components && actionRow.components[0] && vonixeEmoji) {
+                    actionRow.components[0].emoji = { id: vonixeEmoji.id, name: vonixeEmoji.name };
                 }
             } catch (err) { }
             messageOptions.components = components;
         }
 
-        await channel.send(messageOptions);
+        // Send raw payload via REST to bypass discord.js builders mutating our V2 components
+        await client.rest.post(`/channels/${channelId}/messages`, { body: messageOptions });
         res.json({ success: true });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -154,7 +293,8 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
-        GatewayIntentBits.GuildVoiceStates
+        GatewayIntentBits.GuildVoiceStates,
+        GatewayIntentBits.GuildMembers
     ],
     rest: {
         timeout: 10000
@@ -275,6 +415,25 @@ async function loadBotConfig() {
 
 client.once('ready', async () => {
 
+    // Auto-scan members with no roles
+    try {
+        console.log('[Auto-Role] Scanning members without roles...');
+        const unverifiedRoleId = '1515329627864694845';
+        for (const [guildId, guild] of client.guilds.cache) {
+            const members = await guild.members.fetch();
+            let count = 0;
+            members.forEach(member => {
+                if (!member.user.bot && member.roles.cache.size === 1) {
+                    member.roles.add(unverifiedRoleId).catch(() => {});
+                    count++;
+                }
+            });
+            console.log(`[Auto-Role] Added Unverified role to ${count} members in guild ${guild.name}.`);
+        }
+    } catch (err) {
+        console.error('[Auto-Role] Scan error:', err);
+    }
+
     // Auto-Purge Expired Keys Task (runs every 6 hours)
     setInterval(async () => {
         try {
@@ -390,6 +549,26 @@ client.once('ready', async () => {
                     )
             ),
         new SlashCommandBuilder()
+            .setName('setupgames')
+            .setDescription('Create a Supported Games panel (Admin only)')
+            .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+        new SlashCommandBuilder()
+            .setName('editgame')
+            .setDescription('Add/Edit/Remove a game status (Admin only)')
+            .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+            .addStringOption(option => option.setName('name').setDescription('Game name').setRequired(true))
+            .addStringOption(option =>
+                option.setName('status')
+                    .setDescription('Status of the game')
+                    .setRequired(true)
+                    .addChoices(
+                        { name: 'Operational', value: 'Operational' },
+                        { name: 'Degraded', value: 'Degraded' },
+                        { name: 'Deprecated', value: 'Deprecated' },
+                        { name: 'Remove', value: 'Remove' }
+                    )
+            ),
+        new SlashCommandBuilder()
             .setName('setupsupport')
             .setDescription('Create a support ticket panel (Admin only)')
             .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
@@ -471,6 +650,23 @@ client.once('ready', async () => {
             .setName('unbanall')
             .setDescription('Unban semua member yang di-ban saat raid (Admin only)')
             .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+        new SlashCommandBuilder()
+            .setName('giveaway')
+            .setDescription('Start a new giveaway (Admin only)')
+            .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+            .addStringOption(option => option.setName('prize').setDescription('The prize to give away').setRequired(true))
+            .addStringOption(option => option.setName('duration').setDescription('Duration (e.g. 1m, 1h, 1d)').setRequired(true))
+            .addIntegerOption(option => option.setName('winners').setDescription('Number of winners').setRequired(true)),
+        new SlashCommandBuilder()
+            .setName('reroll')
+            .setDescription('Reroll a giveaway winner (Admin only)')
+            .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+            .addStringOption(option => option.setName('message_id').setDescription('Message ID of the giveaway').setRequired(true)),
+        new SlashCommandBuilder()
+            .setName('setupverify')
+            .setDescription('Create a Verify Panel with Captcha (Admin only)')
+            .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+            .addRoleOption(option => option.setName('role').setDescription('Role to give after verification').setRequired(true)),
     ].map(command => command.toJSON());
 
     const rest = new REST({ version: '10' }).setToken(token);
@@ -489,12 +685,67 @@ client.once('ready', async () => {
 });
 
 // 1. Auto-Responder
+const userImageSpam = new Map(); // Untuk track spam gambar
+
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
+
+    // --- ANTI-PHISHING SPAM GAMBAR ---
+    if (message.member && !message.member.permissions.has(PermissionFlagsBits.Administrator) && message.attachments.size > 0) {
+        const now = Date.now();
+        const userId = message.author.id;
+        
+        if (!userImageSpam.has(userId)) {
+            userImageSpam.set(userId, { count: 0, firstMsgTime: now });
+        }
+        
+        const userData = userImageSpam.get(userId);
+        
+        // Reset jika sudah lewat 15 detik
+        if (now - userData.firstMsgTime > 15000) {
+            userData.count = 0;
+            userData.firstMsgTime = now;
+        }
+        
+        userData.count += message.attachments.size;
+        
+        // Jika mengirim 3 gambar atau lebih dalam 15 detik
+        if (userData.count >= 3) {
+            message.delete().catch(() => {});
+            try {
+                await message.member.timeout(60 * 60 * 1000, 'Auto-Mod: Suspected Phishing (Image Spam)');
+                const warningMsg = await message.channel.send({ content: `⚠️ <@${message.author.id}> has been automatically muted for 1 hour for suspected image spam (Anti-Phishing).` });
+                setTimeout(() => warningMsg.delete().catch(() => {}), 15000);
+            } catch (err) {
+                console.error('Failed to timeout phisher:', err);
+            }
+            userData.count = 0; // Reset setelah dihukum
+            return;
+        }
+    }
+    // --------------------------------
+
+    if (message.channel.id === '1519938988939673691' && /VONIXE-/i.test(message.content)) {
+        // Hapus pesan user tanpa memblokir (jika bot belum punya admin/manage messages, tidak akan error)
+        message.delete().catch(() => {});
+        
+        try {
+            const guide = `**[ID]** Halo! Key tidak boleh dikirim di channel ini. Silakan pergi ke <#1515328617952051271> dan ikuti panduan verifikasi di sana untuk mendapatkan akses.\n**[EN]** Hello! Keys are not allowed in this channel. Please go to <#1515328617952051271> and follow the verification guide there to get access.`;
+            
+            const tempMsg = await message.channel.send({ content: `<@${message.author.id}>, ${guide}` });
+            
+            // Hapus pesan bot setelah 5 menit (300000 ms)
+            setTimeout(() => tempMsg.delete().catch(() => {}), 5 * 60 * 1000);
+        } catch (e) {
+            console.error('Failed to process key message:', e);
+        }
+        return;
+    }
     const content = message.content.toLowerCase();
 
     const keywords = ['getkey', 'cara get key', 'dimana key', 'buy premium', 'bantuan', 'tutor', 'bug', 'error', 'help', 'support', 'premium'];
-    if (keywords.some(k => content.includes(k))) {
+    const regex = new RegExp(`\\b(${keywords.join('|')})\\b`, 'i');
+    if (regex.test(content)) {
         const embed = new EmbedBuilder()
             .setTitle(' Vonixe Hub - Community Navigation ')
             .setDescription('**[ID]** Halo! Berikut adalah panduan cepat untuk akses Vonixe Hub:\n**[EN]** Hello! Here is a quick guide to access Vonixe Hub:')
@@ -506,7 +757,13 @@ client.on('messageCreate', async (message) => {
             .setColor(0xffa000)
             .setFooter({ text: 'Gunakan tombol di channel terkait untuk respon cepat. / Use the buttons in the respective channels for a quick response.' });
 
-        return message.reply({ embeds: [embed] });
+        try {
+            const replyMsg = await message.reply({ embeds: [embed] });
+            setTimeout(() => replyMsg.delete().catch(() => {}), 60 * 1000); // Hapus setelah 1 menit
+        } catch (e) {
+            console.error('Failed to send auto-responder message:', e);
+        }
+        return;
     }
 });
 
@@ -528,18 +785,231 @@ client.on('interactionCreate', async (interaction) => {
                 }
             }
 
+            if (command === 'giveaway') {
+                const prize = interaction.options.getString('prize');
+                const durationStr = interaction.options.getString('duration');
+                const winnersCount = interaction.options.getInteger('winners');
+
+                const match = durationStr.match(/^(\d+)([mhd])$/);
+                if (!match) {
+                    return await interaction.reply({ content: 'Invalid duration format. Use: `10m`, `1h`, or `1d`.', flags: 64 });
+                }
+
+                const val = parseInt(match[1]);
+                const unit = match[2];
+                let ms = 0;
+                if (unit === 'm') ms = val * 60 * 1000;
+                else if (unit === 'h') ms = val * 60 * 60 * 1000;
+                else if (unit === 'd') ms = val * 24 * 60 * 60 * 1000;
+
+                const endTime = Date.now() + ms;
+                const endTimestamp = Math.floor(endTime / 1000);
+
+                const payload = {
+                    flags: 32768,
+                    components: [
+                        {
+                            type: 17,
+                            components: [
+                                {
+                                    type: 9,
+                                    components: [{
+                                        type: 10,
+                                        content: `# 🎉 GIVEAWAY 🎉\nPrize: **${prize}**\nWinners: **${winnersCount}**\nEnds: <t:${endTimestamp}:R>\n\nClick the button below to join!`
+                                    }],
+                                    accessory: { type: 11, media: { url: 'https://i.imgur.com/buvIdbn.gif' } }
+                                }
+                            ]
+                        },
+                        {
+                            type: 17,
+                            components: [
+                                {
+                                    type: 1,
+                                    components: [
+                                        { type: 2, custom_id: 'join_giveaway', label: '🎉 Join Giveaway', style: 3 }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                };
+
+                await interaction.reply({ content: 'Giveaway created successfully!', flags: 64 });
+                const msg = await client.rest.post(Routes.channelMessages(interaction.channelId), { body: payload });
+
+                giveaways[msg.id] = {
+                    prize: prize,
+                    endTime: endTime,
+                    winnersCount: winnersCount,
+                    channelId: interaction.channelId,
+                    participants: [],
+                    ended: false
+                };
+                saveGiveaways();
+                return;
+            }
+
+            if (command === 'reroll') {
+                const msgId = interaction.options.getString('message_id');
+                const gw = giveaways[msgId];
+                if (!gw || !gw.ended) {
+                    return await interaction.reply({ content: 'Giveaway not found or has not ended yet.', flags: 64 });
+                }
+
+                if (gw.participants.length === 0) {
+                    return await interaction.reply({ content: 'No participants to reroll.', flags: 64 });
+                }
+
+                const newWinner = gw.participants[Math.floor(Math.random() * gw.participants.length)];
+                await interaction.channel.send(`🎉 **REROLL:** Congratulations <@${newWinner}>! You are the new winner of **${gw.prize}**!`);
+                return await interaction.reply({ content: 'Giveaway rerolled successfully.', flags: 64 });
+            }
+
+            if (command === 'setupgames') {
+                const payload = {
+                    flags: 32768,
+                    components: [
+                        {
+                            type: 17,
+                            components: [
+                                {
+                                    type: 9,
+                                    components: [{
+                                        type: 10,
+                                        content: buildGamesPanelContent()
+                                    }],
+                                    accessory: { type: 11, media: { url: 'https://i.imgur.com/buvIdbn.gif' } }
+                                }
+                            ]
+                        }
+                    ]
+                };
+
+                const msg = await client.rest.post(Routes.channelMessages(interaction.channelId), { body: payload });
+                gamesConfig.messageId = msg.id;
+                gamesConfig.channelId = interaction.channelId;
+                saveGamesConfig();
+                return await interaction.reply({ content: '[ID] Panel Games dibuat. / [EN] Games Panel created.', flags: 64 });
+            }
+
+            if (command === 'editgame') {
+                const gameName = interaction.options.getString('name');
+                const gameStatus = interaction.options.getString('status');
+
+                if (gameStatus === 'Remove') {
+                    gamesConfig.games = gamesConfig.games.filter(g => g.name.toLowerCase() !== gameName.toLowerCase());
+                } else {
+                    const existing = gamesConfig.games.find(g => g.name.toLowerCase() === gameName.toLowerCase());
+                    if (existing) {
+                        existing.status = gameStatus;
+                    } else {
+                        gamesConfig.games.push({ name: gameName, status: gameStatus });
+                    }
+                }
+                saveGamesConfig();
+
+                if (gamesConfig.messageId && gamesConfig.channelId) {
+                    try {
+                        const payload = {
+                            flags: 32768,
+                            components: [
+                                {
+                                    type: 17,
+                                    components: [
+                                        {
+                                            type: 9,
+                                            components: [{
+                                                type: 10,
+                                                content: buildGamesPanelContent()
+                                            }],
+                                            accessory: { type: 11, media: { url: 'https://i.imgur.com/buvIdbn.gif' } }
+                                        }
+                                    ]
+                                }
+                            ]
+                        };
+                        await client.rest.patch(Routes.channelMessage(gamesConfig.channelId, gamesConfig.messageId), { body: payload });
+                        await interaction.reply({ content: `[ID] Berhasil mengupdate status game **${gameName}** menjadi ${gameStatus}! Panel telah diperbarui.`, flags: 64 });
+                    } catch (e) {
+                        console.error('Failed to update games message:', e);
+                        await interaction.reply({ content: `[ID] Game disimpan, tapi panel lama tidak ditemukan. Buat ulang dengan /setupgames.`, flags: 64 });
+                    }
+                } else {
+                    await interaction.reply({ content: `[ID] Game disimpan, tapi belum ada panel. Buat dengan /setupgames.`, flags: 64 });
+                }
+                return;
+            }
+
             if (command === 'setupsupport') {
-                const embed = new EmbedBuilder()
-                    .setTitle(' Vonixe Support Center ')
-                    .setDescription('**[ID]** Butuh bantuan, laporan bug, atau pertanyaan seputar script? Klik tombol di bawah ini untuk membuat tiket bantuan.\n\n**[EN]** Need help, want to report a bug, or have questions about the script? Click the button below to open a support ticket.')
-                    .setColor(0x0099ff);
+                const payload = {
+                    flags: 32768,
+                    components: [
+                        {
+                            type: 17,
+                            components: [
+                                {
+                                    type: 9,
+                                    components: [{
+                                        type: 10,
+                                        content: '# Vonixe Support Center\n**[ID]** Butuh bantuan, laporan bug, atau pertanyaan seputar script? Klik tombol di bawah ini untuk membuat tiket bantuan.\n\n**[EN]** Need help, want to report a bug, or have questions about the script? Click the button below to open a support ticket.'
+                                    }],
+                                    accessory: { type: 11, media: { url: 'https://i.imgur.com/buvIdbn.gif' } }
+                                }
+                            ]
+                        },
+                        {
+                            type: 17,
+                            components: [
+                                {
+                                    type: 1,
+                                    components: [
+                                        { type: 2, custom_id: 'create_ticket_support', label: 'Create Support Ticket', style: 1, emoji: { id: '1521029127820546158' } }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                };
 
-                const row = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId('create_ticket_support').setLabel('Create Support Ticket').setStyle(ButtonStyle.Primary)
-                );
-
-                await interaction.channel.send({ embeds: [embed], components: [row] });
+                await client.rest.post(Routes.channelMessages(interaction.channelId), { body: payload });
                 return await interaction.reply({ content: '[ID] Panel Support dibuat. / [EN] Support Panel created.', flags: 64 });
+            }
+
+            if (command === 'setupverify') {
+                const role = interaction.options.getRole('role');
+                const payload = {
+                    flags: 32768,
+                    components: [
+                        {
+                            type: 17,
+                            components: [
+                                {
+                                    type: 9,
+                                    components: [{
+                                        type: 10,
+                                        content: `# 🔒 VERIFICATION 🔒\n\nTo access the server, you must pass a simple Captcha verification.\nThis is to prevent bot raids and spam.\n\nClick the **Verify** button below and answer the math question!`
+                                    }],
+                                    accessory: { type: 11, media: { url: 'https://i.imgur.com/buvIdbn.gif' } }
+                                }
+                            ]
+                        },
+                        {
+                            type: 17,
+                            components: [
+                                {
+                                    type: 1,
+                                    components: [
+                                        { type: 2, custom_id: `verify_btn_${role.id}`, label: '✅ Verify', style: 3 }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                };
+
+                await client.rest.post(Routes.channelMessages(interaction.channelId), { body: payload });
+                return await interaction.reply({ content: `Verification panel created successfully for role <@&${role.id}>!`, flags: 64 });
             }
 
             if (command === 'setuppremium') {
@@ -547,63 +1017,128 @@ client.on('interactionCreate', async (interaction) => {
                 const price30 = botConfig.premium_key_price || '10.000';
                 const pricePerm = botConfig.premium_key_price_permanent || '20.000';
 
-                const embed = new EmbedBuilder()
-                    .setTitle(' VIP SCRIPT ')
-                    .setDescription(`Price: IDR ${pricePerm} expired: permanen\nPrice: IDR ${price30} expired: 7 hari\n\n1. Transfer sesuai nominal & bukti\n2. Tunggu admin membalas (jangan spam)\n3. save key setelah admin mengirim key\n\n---\n**[EN]**\nPrice: IDR ${pricePerm} (Lifetime)\nPrice: IDR ${price30} (7 Days)\n\n1. Transfer the exact amount & send proof\n2. Wait for admin response (do not spam)\n3. Save your key after admin sends it`)
-                    .setColor(0xffa000);
+                const payload = {
+                    flags: 32768,
+                    components: [
+                        {
+                            type: 17,
+                            components: [
+                                {
+                                    type: 9,
+                                    components: [{
+                                        type: 10,
+                                        content: `# VIP SCRIPT\nPrice: IDR ${pricePerm} expired: permanen\nPrice: IDR ${price30} expired: 7 hari\n\n1. Transfer sesuai nominal & bukti\n2. Tunggu admin membalas (jangan spam)\n3. save key setelah admin mengirim key\n\n---\n**[EN]**\nPrice: IDR ${pricePerm} (Lifetime)\nPrice: IDR ${price30} (7 Days)\n\n1. Transfer the exact amount & send proof\n2. Wait for admin response (do not spam)\n3. Save your key after admin sends it`
+                                    }],
+                                    accessory: { type: 11, media: { url: 'https://i.imgur.com/buvIdbn.gif' } }
+                                }
+                            ]
+                        },
+                        {
+                            type: 17,
+                            components: [
+                                {
+                                    type: 1,
+                                    components: [
+                                        { type: 2, custom_id: 'create_ticket_premium', label: 'Buy / Renew Premium', style: 3, emoji: { id: '1521036643035910144' } }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                };
 
-                const row = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId('create_ticket_premium').setLabel('Buy / Renew Premium').setStyle(ButtonStyle.Success)
-                );
-
-                await interaction.channel.send({ embeds: [embed], components: [row] });
+                await client.rest.post(Routes.channelMessages(interaction.channelId), { body: payload });
                 return await interaction.reply({ content: '[ID] Panel Premium dibuat. / [EN] Premium Panel created.', flags: 64 });
             }
 
             if (command === 'setuppanel') {
                 const type = interaction.options.getString('type');
                 if (type === 'premium') {
-                    const embed = new EmbedBuilder()
-                        .setTitle(' Vonixe Premium Panel ')
-                        .setDescription('**[ID]** Kelola akses script Vonixe Hub Premium kamu. Gunakan tombol di bawah untuk Redeem Key, mendapatkan Script, atau Claim Role.\n\n**[EN]** Manage your script access for Vonixe Hub Premium. Use the buttons below to redeem your key, get the script, or grab your role.')
-                        .setImage('https://i.imgur.com/buvIdbn.gif')
-                        .setColor(0x50dc78);
+                    const payload = {
+                        flags: 32768,
+                        components: [
+                            {
+                                type: 17,
+                                components: [
+                                    {
+                                        type: 9,
+                                        components: [{
+                                            type: 10,
+                                            content: '# Vonixe Premium Panel\n**[ID]** Kelola akses script Vonixe Hub Premium kamu. Gunakan tombol di bawah untuk Redeem Key, mendapatkan Script, atau Claim Role.\n\n**[EN]** Manage your script access for Vonixe Hub Premium. Use the buttons below to redeem your key, get the script, or grab your role.'
+                                        }],
+                                        accessory: { type: 11, media: { url: 'https://i.imgur.com/buvIdbn.gif' } }
+                                    }
+                                ]
+                            },
+                            {
+                                type: 17,
+                                components: [
+                                    {
+                                        type: 1,
+                                        components: [
+                                            { type: 2, custom_id: 'btn_redeem_premium', label: 'Redeem Key', style: 1, emoji: { id: '1521034689887080570' } },
+                                            { type: 2, custom_id: 'btn_get_script', label: 'Get Script', style: 2, emoji: { id: '1521035520321261719' } },
+                                            { type: 2, custom_id: 'btn_get_script_mobile', label: 'Mobile', style: 2, emoji: { id: '1521035827466080266' } }
+                                        ]
+                                    },
+                                    {
+                                        type: 1,
+                                        components: [
+                                            { type: 2, custom_id: 'btn_reset_hwid', label: 'Reset HWID', style: 4, emoji: { id: '1521036091409301685' } },
+                                            { type: 2, custom_id: 'btn_get_stats', label: 'Get Stats', style: 2, emoji: { id: '1521036354933362729' } }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    };
 
-                    const row1 = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('btn_redeem_premium').setLabel('Redeem Key').setStyle(ButtonStyle.Primary),
-                        new ButtonBuilder().setCustomId('btn_get_script').setLabel('Get Script').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_get_script_mobile').setLabel('Mobile').setStyle(ButtonStyle.Secondary)
-                    );
-
-                    const row2 = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('btn_reset_hwid').setLabel('Reset HWID').setStyle(ButtonStyle.Danger),
-                        new ButtonBuilder().setCustomId('btn_get_stats').setLabel('Get Stats').setStyle(ButtonStyle.Secondary)
-                    );
-
-                    await interaction.channel.send({ embeds: [embed], components: [row1, row2] });
+                    await client.rest.post(Routes.channelMessages(interaction.channelId), { body: payload });
                     return await interaction.reply({ content: '[ID] Panel Premium dibuat. / [EN] Premium Panel created.', flags: 64 });
                 }
 
                 if (type === 'free') {
-                    const embed = new EmbedBuilder()
-                        .setTitle(' Vonixe Free Key ')
-                        .setDescription('**[ID]** Dapatkan akses 24 Jam gratis ke Vonixe Hub dengan melewati checkpoint. Klik tombol di bawah ini!\n\n**[EN]** Get free 24-hour access to Vonixe Hub by completing a checkpoint. Click the button below!')
-                        .setImage('https://i.imgur.com/buvIdbn.gif')
-                        .setColor(0x0099ff);
+                    const payload = {
+                        flags: 32768,
+                        components: [
+                            {
+                                type: 17,
+                                components: [
+                                    {
+                                        type: 9,
+                                        components: [{
+                                            type: 10,
+                                            content: '# Vonixe Free Key\n**[ID]** Dapatkan akses 24 Jam gratis ke Vonixe Hub dengan melewati checkpoint. Klik tombol di bawah ini!\n\n**[EN]** Get free 24-hour access to Vonixe Hub by completing a checkpoint. Click the button below!'
+                                        }],
+                                        accessory: { type: 11, media: { url: 'https://i.imgur.com/buvIdbn.gif' } }
+                                    }
+                                ]
+                            },
+                            {
+                                type: 17,
+                                components: [
+                                    {
+                                        type: 1,
+                                        components: [
+                                            { type: 2, custom_id: 'btn_get_free_key', label: 'Get Key', style: 1, emoji: { id: '1521034689887080570' } },
+                                            { type: 2, custom_id: 'btn_claim_free_key', label: 'Claim Key', style: 3, emoji: { id: '1521035244298440716' } },
+                                            { type: 2, custom_id: 'btn_get_script_free', label: 'Get Script', style: 2, emoji: { id: '1521035520321261719' } },
+                                            { type: 2, custom_id: 'btn_get_script_mobile_free', label: 'Mobile', style: 2, emoji: { id: '1521035827466080266' } }
+                                        ]
+                                    },
+                                    {
+                                        type: 1,
+                                        components: [
+                                            { type: 2, custom_id: 'btn_reset_hwid_free', label: 'Reset HWID', style: 4, emoji: { id: '1521036091409301685' } }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    };
 
-                    const row = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('btn_get_free_key').setLabel('Get Key').setStyle(ButtonStyle.Primary),
-                        new ButtonBuilder().setCustomId('btn_claim_free_key').setLabel('Claim Key').setStyle(ButtonStyle.Success),
-                        new ButtonBuilder().setCustomId('btn_get_script_free').setLabel('Get Script').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_get_script_mobile_free').setLabel('Mobile').setStyle(ButtonStyle.Secondary)
-                    );
-
-                    const row2 = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('btn_reset_hwid_free').setLabel('Reset HWID').setStyle(ButtonStyle.Danger)
-                    );
-
-                    await interaction.channel.send({ embeds: [embed], components: [row, row2] });
-                    return await interaction.reply({ content: '[ID] Panel Gratis dibuat. / [EN] Free Panel created.', flags: 64 });
+                    await client.rest.post(Routes.channelMessages(interaction.channelId), { body: payload });
+                    return await interaction.reply({ content: '[ID] Panel Free dibuat. / [EN] Free Panel created.', flags: 64 });
                 }
             }
 
@@ -949,6 +1484,51 @@ client.on('interactionCreate', async (interaction) => {
             const userId = interaction.user.id;
             const userName = interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '');
 
+            if (interaction.customId.startsWith('verify_btn_')) {
+                const roleId = interaction.customId.replace('verify_btn_', '');
+
+                if (interaction.member.roles.cache.has(roleId)) {
+                    return await interaction.reply({ content: 'You are already verified!', flags: 64 });
+                }
+
+                const num1 = Math.floor(Math.random() * 10) + 1;
+                const num2 = Math.floor(Math.random() * 10) + 1;
+                const answer = num1 + num2;
+
+                const modal = new ModalBuilder()
+                    .setCustomId(`verify_modal_${roleId}_${answer}`)
+                    .setTitle('Security Captcha');
+
+                const mathInput = new TextInputBuilder()
+                    .setCustomId('captcha_answer')
+                    .setLabel(`What is ${num1} + ${num2}?`)
+                    .setStyle(TextInputStyle.Short)
+                    .setPlaceholder('Enter the number here...')
+                    .setRequired(true);
+
+                const firstActionRow = new ActionRowBuilder().addComponents(mathInput);
+                modal.addComponents(firstActionRow);
+
+                return await interaction.showModal(modal);
+            }
+
+            if (interaction.customId === 'join_giveaway') {
+                const msgId = interaction.message.id;
+                const gw = giveaways[msgId];
+
+                if (!gw || gw.ended) {
+                    return await interaction.reply({ content: 'This giveaway has ended or does not exist.', flags: 64 });
+                }
+
+                if (gw.participants.includes(userId)) {
+                    return await interaction.reply({ content: 'You have already joined this giveaway!', flags: 64 });
+                }
+
+                gw.participants.push(userId);
+                saveGiveaways();
+                return await interaction.reply({ content: '🎉 You have successfully joined the giveaway!', flags: 64 });
+            }
+
             if (interaction.customId === 'create_ticket_support') {
                 const modal = new ModalBuilder()
                     .setCustomId('modal_support_ticket')
@@ -1005,6 +1585,9 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             if (interaction.customId === 'close_ticket') {
+                if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+                    return await interaction.reply({ content: '[ID] Hanya Admin yang dapat menutup tiket! / [EN] Only Admins can close tickets!', flags: 64 });
+                }
                 await interaction.reply({ content: '[ID] Tiket akan ditutup dalam 5 detik... / [EN] Ticket will be closed in 5 seconds...' });
                 setTimeout(() => interaction.channel.delete().catch(e => console.error(' Delete Error:', e)), 5000);
             }
@@ -1250,6 +1833,29 @@ client.on('interactionCreate', async (interaction) => {
 
         // Handle Modal Submission
         if (interaction.isModalSubmit()) {
+
+            if (interaction.customId.startsWith('verify_modal_')) {
+                const parts = interaction.customId.split('_');
+                const roleId = parts[2];
+                const expectedAnswer = parts[3];
+
+                const userAnswer = interaction.fields.getTextInputValue('captcha_answer').trim();
+
+                if (userAnswer !== expectedAnswer) {
+                    return await interaction.reply({ content: '❌ Incorrect answer. Please try again.', flags: 64 });
+                }
+
+                try {
+                    await interaction.member.roles.add(roleId);
+                    if (interaction.member.roles.cache.has('1515329627864694845')) {
+                        await interaction.member.roles.remove('1515329627864694845');
+                    }
+                    return await interaction.reply({ content: '✅ Verification successful! You now have access to the server.', flags: 64 });
+                } catch (err) {
+                    console.error('Error assigning verify role:', err);
+                    return await interaction.reply({ content: 'Verification successful, but I could not assign the role. Please contact an admin.', flags: 64 });
+                }
+            }
 
             if (interaction.customId === 'modal_claim_free_key') {
 
@@ -2046,6 +2652,14 @@ function startGAG2StockTracker() {
 const loginTimeout = setTimeout(() => {
     console.error(' Login timeout: Bot took too long to connect (lebih dari 60 detik). Coba cek koneksi internet kamu.');
 }, 60000);
+
+client.on('guildMemberAdd', async (member) => {
+    try {
+        await member.roles.add('1515329627864694845');
+    } catch (e) {
+        console.error('Failed to add unverified role:', e);
+    }
+});
 
 client.login(token).then(() => {
     clearTimeout(loginTimeout);
