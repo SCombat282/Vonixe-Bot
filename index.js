@@ -189,6 +189,14 @@ app.post('/api/live/heartbeat', (req, res) => {
     }
     res.sendStatus(200);
 });
+app.use('/api/admin', (req, res, next) => {
+    const secret = process.env.ADMIN_SECRET || 'vonixe_admin_secure_123';
+    const auth = req.headers.authorization || req.query.secret || req.body.secret;
+    if (auth !== secret) {
+        return res.status(401).json({ error: 'Unauthorized Admin Access' });
+    }
+    next();
+});
 
 app.get('/api/admin/live', (req, res) => {
     const sessions = Object.values(liveSessions);
