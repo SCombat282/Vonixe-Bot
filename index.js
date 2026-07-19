@@ -249,39 +249,7 @@ app.post('/api/admin/announce', async (req, res) => {
     }
 });
 
-app.post('/api/sellauth/dynamic', async (req, res) => {
-    // Gunakan URL ini di Sellauth Dynamic Product: 
-    // https://domain-bot-kamu.com/api/sellauth/dynamic?duration=LIFETIME&secret=RAHASIA
 
-    const secret = req.query.secret;
-    if (secret !== (process.env.SELLAUTH_SECRET || 'vonixe123')) {
-        return res.status(401).send('Unauthorized');
-    }
-
-    const durationInput = req.query.duration || 'LIFETIME';
-    const cleanDurationStr = durationInput.toUpperCase();
-
-    // Fungsi generateRandomString
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let randStr = '';
-    for (let i = 0; i < 12; i++) {
-        randStr += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    const licenseCode = `VONIXE-LIC-${cleanDurationStr}-` + randStr;
-
-    const { error } = await supabase.from('hub_licenses').insert([{
-        code: licenseCode,
-        duration_days: 0
-    }]);
-
-    if (error) {
-        console.error('Sellauth API Error:', error);
-        return res.status(500).send("Error generating license");
-    }
-
-    // Response ini akan otomatis ditampilkan ke pembeli di Sellauth
-    res.send(`License Code: ${licenseCode}\n\nHow to use:\n1. Join the Vonixe Discord Server\n2. Go to the Premium Panel channel\n3. Click Redeem Key and enter the code above.`);
-});
 
 app.listen(port, '0.0.0.0', () => {
     console.log(`Server running on port ${port}`);
@@ -424,7 +392,7 @@ client.once('ready', async () => {
             let count = 0;
             members.forEach(member => {
                 if (!member.user.bot && member.roles.cache.size === 1) {
-                    member.roles.add(unverifiedRoleId).catch(() => {});
+                    member.roles.add(unverifiedRoleId).catch(() => { });
                     count++;
                 }
             });
@@ -573,6 +541,13 @@ client.once('ready', async () => {
             .setDescription('Create a support ticket panel (Admin only)')
             .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
         new SlashCommandBuilder()
+            .setName('close')
+            .setDescription('Close the current ticket (Admin only)')
+            .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+        new SlashCommandBuilder()
+            .setName('buy')
+            .setDescription('Select payment method inside a premium ticket'),
+        new SlashCommandBuilder()
             .setName('setuppremium')
             .setDescription('Create a premium purchase panel (Admin only)')
             .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
@@ -661,6 +636,12 @@ client.once('ready', async () => {
             .setName('reroll')
             .setDescription('Reroll a giveaway winner (Admin only)')
             .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+            .addStringOption(option => option.setName('message_id').setDescription('Message ID of the giveaway').setRequired(true))
+            .addUserOption(option => option.setName('user').setDescription('Specific winner to reroll').setRequired(false)),
+        new SlashCommandBuilder()
+            .setName('rerollall')
+            .setDescription('Reroll ALL giveaway winners (Admin only)')
+            .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
             .addStringOption(option => option.setName('message_id').setDescription('Message ID of the giveaway').setRequired(true)),
         new SlashCommandBuilder()
             .setName('setupverify')
@@ -694,28 +675,28 @@ client.on('messageCreate', async (message) => {
     if (message.member && !message.member.permissions.has(PermissionFlagsBits.Administrator) && message.attachments.size > 0) {
         const now = Date.now();
         const userId = message.author.id;
-        
+
         if (!userImageSpam.has(userId)) {
             userImageSpam.set(userId, { count: 0, firstMsgTime: now });
         }
-        
+
         const userData = userImageSpam.get(userId);
-        
+
         // Reset jika sudah lewat 15 detik
         if (now - userData.firstMsgTime > 15000) {
             userData.count = 0;
             userData.firstMsgTime = now;
         }
-        
+
         userData.count += message.attachments.size;
-        
+
         // Jika mengirim 3 gambar atau lebih dalam 15 detik
         if (userData.count >= 3) {
-            message.delete().catch(() => {});
+            message.delete().catch(() => { });
             try {
                 await message.member.timeout(60 * 60 * 1000, 'Auto-Mod: Suspected Phishing (Image Spam)');
                 const warningMsg = await message.channel.send({ content: `⚠️ <@${message.author.id}> has been automatically muted for 1 hour for suspected image spam (Anti-Phishing).` });
-                setTimeout(() => warningMsg.delete().catch(() => {}), 15000);
+                setTimeout(() => warningMsg.delete().catch(() => { }), 15000);
             } catch (err) {
                 console.error('Failed to timeout phisher:', err);
             }
@@ -727,15 +708,15 @@ client.on('messageCreate', async (message) => {
 
     if (message.channel.id === '1519938988939673691' && /VONIXE-/i.test(message.content)) {
         // Hapus pesan user tanpa memblokir (jika bot belum punya admin/manage messages, tidak akan error)
-        message.delete().catch(() => {});
-        
+        message.delete().catch(() => { });
+
         try {
             const guide = `**[ID]** Halo! Key tidak boleh dikirim di channel ini. Silakan pergi ke <#1515328617952051271> dan ikuti panduan verifikasi di sana untuk mendapatkan akses.\n**[EN]** Hello! Keys are not allowed in this channel. Please go to <#1515328617952051271> and follow the verification guide there to get access.`;
-            
+
             const tempMsg = await message.channel.send({ content: `<@${message.author.id}>, ${guide}` });
-            
+
             // Hapus pesan bot setelah 5 menit (300000 ms)
-            setTimeout(() => tempMsg.delete().catch(() => {}), 5 * 60 * 1000);
+            setTimeout(() => tempMsg.delete().catch(() => { }), 5 * 60 * 1000);
         } catch (e) {
             console.error('Failed to process key message:', e);
         }
@@ -759,7 +740,7 @@ client.on('messageCreate', async (message) => {
 
         try {
             const replyMsg = await message.reply({ embeds: [embed] });
-            setTimeout(() => replyMsg.delete().catch(() => {}), 60 * 1000); // Hapus setelah 1 menit
+            setTimeout(() => replyMsg.delete().catch(() => { }), 60 * 1000); // Hapus setelah 1 menit
         } catch (e) {
             console.error('Failed to send auto-responder message:', e);
         }
@@ -783,6 +764,28 @@ client.on('interactionCreate', async (interaction) => {
                 if (homeGuild && interaction.guildId !== homeGuild.id) {
                     return await interaction.reply({ content: '[ID] Bot hanya bisa menerima perintah di Official Server! / [EN] Bot can only receive commands in the Official Server!', flags: 64 });
                 }
+            }
+
+            if (command === 'close') {
+                await interaction.reply({ content: '[ID] Tiket akan ditutup dalam 5 detik... / [EN] Ticket will be closed in 5 seconds...' });
+                setTimeout(() => interaction.channel.delete().catch(e => console.error(' Delete Error:', e)), 5000);
+                return;
+            }
+
+            if (command === 'buy') {
+                if (!interaction.channel.name.startsWith('premium-') && !interaction.channel.name.startsWith('perpanjang-')) {
+                    return await interaction.reply({ content: '[ID] Perintah ini hanya bisa digunakan di dalam tiket premium! / [EN] This command can only be used inside a premium ticket!', flags: 64 });
+                }
+
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('pay_qr').setLabel('QR Code (QRIS)').setStyle(ButtonStyle.Success),
+                    new ButtonBuilder().setCustomId('pay_bank').setLabel('Bank Account / Web (Sellauth)').setStyle(ButtonStyle.Primary)
+                );
+
+                return await interaction.reply({
+                    content: '**[ID]** Silakan pilih metode pembayaran Anda:\n**[EN]** Please select your payment method:',
+                    components: [row]
+                });
             }
 
             if (command === 'giveaway') {
@@ -852,6 +855,37 @@ client.on('interactionCreate', async (interaction) => {
 
             if (command === 'reroll') {
                 const msgId = interaction.options.getString('message_id');
+                const userToReroll = interaction.options.getUser('user');
+                const gw = giveaways[msgId];
+                if (!gw || !gw.ended) {
+                    return await interaction.reply({ content: 'Giveaway not found or has not ended yet.', flags: 64 });
+                }
+
+                let pool = gw.participants;
+                if (userToReroll) {
+                    pool = gw.participants.filter(id => id !== userToReroll.id);
+                    if (pool.length === 0) {
+                        return await interaction.reply({ content: 'No other participants available to replace this user.', flags: 64 });
+                    }
+                } else {
+                    if (pool.length === 0) {
+                        return await interaction.reply({ content: 'No participants to reroll.', flags: 64 });
+                    }
+                }
+
+                const newWinner = pool[Math.floor(Math.random() * pool.length)];
+
+                let message = `🎉 **REROLL:** Congratulations <@${newWinner}>! You are the new winner of **${gw.prize}**!`;
+                if (userToReroll) {
+                    message = `🎉 **REROLL:** <@${userToReroll.id}>'s win has been rerolled! Congratulations <@${newWinner}>! You are the new winner of **${gw.prize}**!`;
+                }
+
+                await interaction.channel.send(message);
+                return await interaction.reply({ content: 'Giveaway rerolled successfully.', flags: 64 });
+            }
+
+            if (command === 'rerollall') {
+                const msgId = interaction.options.getString('message_id');
                 const gw = giveaways[msgId];
                 if (!gw || !gw.ended) {
                     return await interaction.reply({ content: 'Giveaway not found or has not ended yet.', flags: 64 });
@@ -861,9 +895,13 @@ client.on('interactionCreate', async (interaction) => {
                     return await interaction.reply({ content: 'No participants to reroll.', flags: 64 });
                 }
 
-                const newWinner = gw.participants[Math.floor(Math.random() * gw.participants.length)];
-                await interaction.channel.send(`🎉 **REROLL:** Congratulations <@${newWinner}>! You are the new winner of **${gw.prize}**!`);
-                return await interaction.reply({ content: 'Giveaway rerolled successfully.', flags: 64 });
+                const winnersCount = gw.winnersCount || 1;
+                const shuffled = [...gw.participants].sort(() => 0.5 - Math.random());
+                const newWinners = shuffled.slice(0, winnersCount);
+
+                const winnersText = newWinners.map(id => `<@${id}>`).join(', ');
+                await interaction.channel.send(`🎉 **REROLL ALL:** Congratulations ${winnersText}! You are the new winners of **${gw.prize}**!`);
+                return await interaction.reply({ content: 'Giveaway all winners rerolled successfully.', flags: 64 });
             }
 
             if (command === 'setupgames') {
@@ -1484,6 +1522,28 @@ client.on('interactionCreate', async (interaction) => {
             const userId = interaction.user.id;
             const userName = interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '');
 
+            if (interaction.customId === 'pay_qr') {
+                await loadBotConfig();
+                const qrUrl = botConfig.discord_qr_image_url;
+                if (!qrUrl) return await interaction.reply({ content: '[ID] QR Image belum dikonfigurasi. / [EN] QR Image not configured.', flags: 64 });
+                const embed = new EmbedBuilder()
+                    .setTitle(' QR Pembayaran / Payment QR ')
+                    .setDescription('**[ID]** Scan QR di bawah ini untuk memproses pembayaran Anda.\n**[EN]** Scan the QR below to process your payment.')
+                    .setImage(qrUrl)
+                    .setColor(0x00ff00)
+                    .setFooter({ text: 'Mohon kirim bukti transfer ke tiket / Please send payment proof to the ticket' });
+                return await interaction.reply({ embeds: [embed] });
+            }
+
+            if (interaction.customId === 'pay_bank') {
+                const embed = new EmbedBuilder()
+                    .setTitle(' Bank Account / Sellauth ')
+                    .setDescription('**[ID]** Silakan lakukan pembayaran melalui website Sellauth kami:\n👉 **https://vonixe-hub.mysellauth.com/product/vonixe-hub-premium-key**\n\n**[EN]** Please make your payment through our Sellauth website:\n👉 **https://vonixe-hub.mysellauth.com/product/vonixe-hub-premium-key**')
+                    .setColor(0x0055ff)
+                    .setFooter({ text: 'Konfirmasi order akan otomatis dikirimkan ke email Anda / Order confirmation will be sent to your email' });
+                return await interaction.reply({ embeds: [embed] });
+            }
+
             if (interaction.customId.startsWith('verify_btn_')) {
                 const roleId = interaction.customId.replace('verify_btn_', '');
 
@@ -1728,19 +1788,36 @@ client.on('interactionCreate', async (interaction) => {
 
                 const activeKey = keys[0];
 
-                if (interaction.customId === 'btn_get_script') {
-                    const loadstringUrl = botConfig.roblox_loadstring_url || 'https://raw.githubusercontent.com/SCombat282/vonixehub/refs/heads/main/bootstrapper.lua';
-                    const embed = new EmbedBuilder()
-                        .setTitle('Loader Script')
-                        .setDescription('Copy and paste this script into your executor:\n\n```lua\ngetgenv().script_key="' + activeKey.key_string + '";\nloadstring(game:HttpGet("' + loadstringUrl + '"))()\n```\n\n **Don\'t share your key or script with anyone else!**')
-                        .setColor(0x50dc78);
-                    return await interaction.reply({ embeds: [embed], flags: 64 });
-                }
+                if (interaction.customId === 'btn_get_script' || interaction.customId === 'btn_get_script_mobile') {
+                    const isMobile = interaction.customId === 'btn_get_script_mobile';
+                    
+                    const activeKeys = keys.filter(k => !k.expires_at || new Date(k.expires_at).getTime() > Date.now()).slice(0, 25);
+                    if (activeKeys.length === 0) {
+                        return await interaction.reply({ content: '[ID] Semua key kamu sudah expired. / [EN] All your keys are expired.', flags: 64 });
+                    }
 
-                if (interaction.customId === 'btn_get_script_mobile') {
-                    const loadstringUrl = botConfig.roblox_loadstring_url || 'https://raw.githubusercontent.com/SCombat282/vonixehub/refs/heads/main/bootstrapper.lua';
-                    const code = `getgenv().script_key="${activeKey.key_string}";\nloadstring(game:HttpGet("${loadstringUrl}"))()`;
-                    return await interaction.reply({ content: code, flags: 64 });
+                    const selectMenu = new StringSelectMenuBuilder()
+                        .setCustomId(isMobile ? 'select_get_script_mobile' : 'select_get_script')
+                        .setPlaceholder('Select a key to use...');
+
+                    for (const k of activeKeys) {
+                        let desc = 'Lifetime';
+                        if (k.expires_at) {
+                            const diff = new Date(k.expires_at).getTime() - Date.now();
+                            const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                            const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+                            desc = `Sisa / Left: ${days}d ${hours}h`;
+                        }
+                        selectMenu.addOptions(
+                            new StringSelectMenuOptionBuilder()
+                                .setLabel(k.key_string.substring(0, 50))
+                                .setDescription(desc)
+                                .setValue(k.key_string)
+                        );
+                    }
+
+                    const row = new ActionRowBuilder().addComponents(selectMenu);
+                    return await interaction.reply({ content: 'Pilih key mana yang ingin digunakan:\nSelect which key to use:', components: [row], flags: 64 });
                 }
 
                 if (interaction.customId === 'btn_get_role') {
@@ -1812,6 +1889,23 @@ client.on('interactionCreate', async (interaction) => {
 
         // Handle Selection Menu
         if (interaction.isStringSelectMenu()) {
+            if (interaction.customId === 'select_get_script' || interaction.customId === 'select_get_script_mobile') {
+                const selectedKey = interaction.values[0];
+                const isMobile = interaction.customId === 'select_get_script_mobile';
+                const loadstringUrl = botConfig.roblox_loadstring_url || 'https://raw.githubusercontent.com/SCombat282/vonixehub/refs/heads/main/bootstrapper.lua';
+
+                if (isMobile) {
+                    const code = `getgenv().script_key="${selectedKey}";\nloadstring(game:HttpGet("${loadstringUrl}"))()`;
+                    return await interaction.reply({ content: code, flags: 64 });
+                } else {
+                    const embed = new EmbedBuilder()
+                        .setTitle('Loader Script')
+                        .setDescription('Copy and paste this script into your executor:\n\n```lua\ngetgenv().script_key="' + selectedKey + '";\nloadstring(game:HttpGet("' + loadstringUrl + '"))()\n```\n\n **Don\'t share your key or script with anyone else!**')
+                        .setColor(0x50dc78);
+                    return await interaction.reply({ embeds: [embed], flags: 64 });
+                }
+            }
+
             if (interaction.customId === 'select_premium_type') {
                 await interaction.deferUpdate();
                 const choice = interaction.values[0];
@@ -2006,6 +2100,11 @@ async function createTicketChannel(interaction, channelName, categoryId, typeTit
     const guild = interaction.guild;
     const userId = interaction.user.id;
 
+    const existingChannel = guild.channels.cache.find(c => c.name === channelName);
+    if (existingChannel) {
+        return await interaction.reply({ content: `[ID] Anda sudah memiliki tiket yang aktif: <#${existingChannel.id}>. Harap tutup tiket tersebut sebelum membuat yang baru.\n[EN] You already have an active ticket: <#${existingChannel.id}>. Please close it before creating a new one.`, flags: 64 });
+    }
+
     try {
         const channel = await guild.channels.create({
             name: channelName,
@@ -2017,9 +2116,11 @@ async function createTicketChannel(interaction, channelName, categoryId, typeTit
             ]
         });
 
+        let desc = `[ID] Halo <@${userId}>, Staff akan segera melayani anda.\n[EN] Hello <@${userId}>, Staff will assist you shortly.`;
+
         const embed = new EmbedBuilder()
             .setTitle(` ${typeTitle}`)
-            .setDescription(`[ID] Halo <@${userId}>, Staff akan segera melayani anda.\n[EN] Hello <@${userId}>, Staff will assist you shortly.`)
+            .setDescription(desc)
             .setColor(0x00ff00)
             .setTimestamp();
 
@@ -2034,10 +2135,21 @@ async function createTicketChannel(interaction, channelName, categoryId, typeTit
         );
 
         await channel.send({
-            content: `<@${userId}>`,
+            content: `<@${userId}> <@&1517958967936942081> <@&1393271773134323792>`,
             embeds: [embed],
             components: [row]
         });
+
+        if (typeTitle === 'Buy Premium' || typeTitle === 'Renew Premium') {
+            const payRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('pay_qr').setLabel('QR Code (QRIS)').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId('pay_bank').setLabel('Bank Account / Web (Sellauth)').setStyle(ButtonStyle.Primary)
+            );
+            await channel.send({
+                content: '**[ID]** Silakan pilih metode pembayaran Anda:\n**[EN]** Please select your payment method:',
+                components: [payRow]
+            });
+        }
 
         await interaction.reply({ content: `[ID] Tiket dibuat: <#${channel.id}> / [EN] Ticket created: <#${channel.id}>`, flags: 64 });
 
